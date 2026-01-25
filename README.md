@@ -62,6 +62,7 @@
 
 4. **Environment Setup**
     * Create a `.env` file in the `server` directory.
+    * Add port as variable, e.g, PORT=3000
     * Add your database URL and API keys:
 
         ```env
