@@ -27,8 +27,9 @@
 * **Database:** PostgreSQL (via Supabase or local instance)
 * **ORM:** Prisma
 * **Authentication:** Firebase Auth or Supabase Auth
-* **Infrastructure:** Terraform + LocalStack (for local emulation)
 * **External Data:** Open Food Facts API
+* **Infrastructure:** Kubernetes (Amazon EKS), Terraform, ArgoCD
+* **Local Dev:** Docker Compose, LocalStack (for AWS service emulation)
 
 ## 🚀 Getting Started
 
