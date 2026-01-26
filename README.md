@@ -27,6 +27,7 @@
 * **Database:** PostgreSQL (via Supabase or local instance)
 * **ORM:** Prisma
 * **Authentication:** Firebase Auth or Supabase Auth
+* **Infrastructure:** Terraform + LocalStack (for local emulation)
 * **External Data:** Open Food Facts API
 
 ## 🚀 Getting Started
@@ -36,6 +37,7 @@
 * Node.js (v18+)
 * npm or yarn
 * Expo Go app on your physical device (iOS/Android) or an Emulator.
+* Terraform (for infrastructure)
 
 ### Installation
 
@@ -70,6 +72,34 @@
         JWT_SECRET="your_secret_key"
         ```
 
-5. **Run the App**
-    * **Server:** `npm run dev` (inside `/server`)
+5. **Docker Setup**
+    From the project root:
+
+    * **Option A: Server Development** (Database in Docker, Server Local)
+
+      ```bash
+      docker compose up -d
+      ```
+
+    * **Option B: App Development** (Database & Server in Docker)
+
+      ```bash
+      docker compose --profile app-dev up -d
+      ```
+
+    * **Note on AWS:** This setup includes **LocalStack** running on port `4566`.
+      The server is pre-configured to use this for S3/Lambda calls during development.
+
+6. **Run the App**
+    * **Server:** `npm run dev` (inside `/server`) - *Only required for Option A.*
     * **Client:** `npx expo start` (inside `/client`)
+
+### Infrastructure (Terraform)
+
+To deploy the infrastructure locally to LocalStack:
+
+1. Navigate to the terraform directory: `cd terraform`
+2. Initialize Terraform: `terraform init`
+3. Apply the configuration: `terraform apply --auto-approve`
+
+This will create the S3 bucket and Lambda function inside the LocalStack container.
