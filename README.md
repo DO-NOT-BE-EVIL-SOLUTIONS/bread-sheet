@@ -24,11 +24,11 @@
 
 * **Runtime:** Node.js
 * **Framework:** Express.js
-* **Database:** PostgreSQL (via Supabase or local instance)
+* **Database:** PostgreSQL
 * **ORM:** Prisma
 * **Authentication:** Firebase Auth or Supabase Auth
 * **External Data:** Open Food Facts API
-* **Infrastructure:** Kubernetes (Amazon EKS), Terraform, ArgoCD
+* **Infrastructure:** Kubernetes (Amazon EKS), AWS Database, Terraform, ArgoCD
 * **Local Dev:** Docker Compose, LocalStack (for AWS service emulation)
 
 ## 🚀 Getting Started
@@ -40,19 +40,13 @@
 * Expo Go app on your physical device (iOS/Android) or an Emulator.
 * Terraform (for infrastructure)
 
-### Installation
+### Local Installation
 
 1. **Clone the repository**
+2. **Install React App Dependencies**
 
     ```bash
-    git clone [https://github.com/your-username/bread-sheet.git](https://github.com/your-username/bread-sheet.git)
-    cd bread-sheet
-    ```
-
-2. **Install Client Dependencies**
-
-    ```bash
-    cd client
+    cd bread-sheet-app
     npm install
     ```
 
@@ -69,14 +63,15 @@
     * Add your database URL and API keys:
 
         ```env
-        DATABASE_URL="postgresql://user:password@localhost:5432/breadsheet"
-        JWT_SECRET="your_secret_key"
+        PORT=3000
+        NODE_ENV=development
+        DATABASE_URL="postgresql://admin:password@localhost:5432/breadsheet"
         ```
 
 5. **Docker Setup**
     From the project root:
 
-    * **Option A: Server Development** (Database in Docker, Server Local)
+    * **Option A: Server Development** (Only Database in Docker)
 
       ```bash
       docker compose up -d
@@ -91,8 +86,8 @@
     * **Note on AWS:** This setup includes **LocalStack** running on port `4566`.
       The server is pre-configured to use this for S3/Lambda calls during development.
 
-6. **Run the App**
-    * **Server:** `npm run dev` (inside `/server`) - *Only required for Option A.*
+6. **Run the Server/App**
+    * **Server:** `npm run dev` (inside `/server`)
     * **Client:** `npx expo start` (inside `/client`)
 
 ### Infrastructure (Terraform)
