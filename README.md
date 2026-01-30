@@ -69,7 +69,7 @@
     * Add your database URL and API keys:
 
         ```env
-        DATABASE_URL="postgresql://user:password@localhost:5432/tastebud"
+        DATABASE_URL="postgresql://user:password@localhost:5432/breadsheet"
         JWT_SECRET="your_secret_key"
         ```
 

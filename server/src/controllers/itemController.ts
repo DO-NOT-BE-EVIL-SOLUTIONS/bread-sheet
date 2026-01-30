@@ -1,12 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
-import { items, Item } from '../models/item.js';
+import prisma from '../configs/prisma.js';
 
 // Create an item
-export const createItem = (req: Request, res: Response, next: NextFunction) => {
+export const createItem = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name } = req.body;
-    const newItem: Item = { id: Date.now(), name };
-    items.push(newItem);
+    const newItem = await prisma.item.create({
+      data: { name },
+    });
     res.status(201).json(newItem);
   } catch (error) {
     next(error);
@@ -14,8 +15,9 @@ export const createItem = (req: Request, res: Response, next: NextFunction) => {
 };
 
 // Read all items
-export const getItems = (req: Request, res: Response, next: NextFunction) => {
+export const getItems = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const items = await prisma.item.findMany();
     res.json(items);
   } catch (error) {
     next(error);
@@ -23,10 +25,12 @@ export const getItems = (req: Request, res: Response, next: NextFunction) => {
 };
 
 // Read single item
-export const getItemById = (req: Request, res: Response, next: NextFunction) => {
+export const getItemById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id as string, 10);
-    const item = items.find((i) => i.id === id);
+    const item = await prisma.item.findUnique({
+      where: { id },
+    });
     if (!item) {
       res.status(404).json({ message: 'Item not found' });
       return;
@@ -38,32 +42,38 @@ export const getItemById = (req: Request, res: Response, next: NextFunction) => 
 };
 
 // Update an item
-export const updateItem = (req: Request, res: Response, next: NextFunction) => {
+export const updateItem = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id as string, 10);
     const { name } = req.body;
-    const itemIndex = items.findIndex((i) => i.id === id);
-    if (itemIndex === -1) {
+    
+    // Check if item exists first
+    const existingItem = await prisma.item.findUnique({ where: { id } });
+    if (!existingItem) {
       res.status(404).json({ message: 'Item not found' });
       return;
     }
-    items[itemIndex].name = name;
-    res.json(items[itemIndex]);
+
+    const updatedItem = await prisma.item.update({ where: { id }, data: { name } });
+    res.json(updatedItem);
   } catch (error) {
     next(error);
   }
 };
 
 // Delete an item
-export const deleteItem = (req: Request, res: Response, next: NextFunction) => {
+export const deleteItem = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id as string, 10);
-    const itemIndex = items.findIndex((i) => i.id === id);
-    if (itemIndex === -1) {
+
+    // Check if item exists first
+    const existingItem = await prisma.item.findUnique({ where: { id } });
+    if (!existingItem) {
       res.status(404).json({ message: 'Item not found' });
       return;
     }
-    const deletedItem = items.splice(itemIndex, 1)[0];
+
+    const deletedItem = await prisma.item.delete({ where: { id } });
     res.json(deletedItem);
   } catch (error) {
     next(error);
