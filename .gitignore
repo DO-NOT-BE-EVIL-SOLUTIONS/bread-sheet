@@ -8,6 +8,7 @@ bare-apps
 .DS_Store
 
 # Node
+dist
 node_modules
 npm-debug.log
 yarn-error.log
@@ -16,6 +17,7 @@ yarn-error.log
 .direnv
 
 # Env
+.env
 .envrc.local
 
 # Emacs

@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:18-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=breadsheet
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  # Server: Only starts in 'app-dev' profile
+  server:
+    build: ./server
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DB_HOST=db # Docker internal hostname
+      - DB_USER=admin
+      - DB_PASSWORD=password
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566 # Points AWS SDK to LocalStack
+    depends_on:
+      - db
+    profiles:
+      - app-dev
+
+  # LocalStack: Emulates AWS (S3, Lambda, etc.) locally
+  localstack:
+    image: localstack/localstack
+    ports:
+      - "4566:4566" # Gateway port for all services
+    environment:
+      - SERVICES=s3,lambda,iam,sts
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock # Required for Lambda execution
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - localstack_data:/var/lib/localstack
+
+volumes:
+  db_data:
+  localstack_data:
