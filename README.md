@@ -35,7 +35,7 @@
 
 ### Prerequisites
 
-* Node.js (v18+)
+* Node.js (v24)
 * npm or yarn
 * Expo Go app on your physical device (iOS/Android) or an Emulator.
 * Terraform (for infrastructure)
@@ -45,8 +45,8 @@
 1. **Clone the repository**
 
     ```bash
-    git clone [https://github.com/your-username/tastebud.git](https://github.com/your-username/tastebud.git)
-    cd tastebud
+    git clone [https://github.com/your-username/bread-sheet.git](https://github.com/your-username/bread-sheet.git)
+    cd bread-sheet
     ```
 
 2. **Install Client Dependencies**
