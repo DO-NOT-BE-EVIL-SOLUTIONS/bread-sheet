@@ -4,9 +4,12 @@
   "description": "REST Backend for BreadSheet",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "build": "npm run prisma:generate && tsc",
+    "build:docker": "tsc",
     "start": "node dist/server.js",
-    "dev": "nodemon --watch \"src/**/*.ts\" --exec \"node --loader ts-node/esm\" src/server.ts",
+    "dev": "npm run prisma:generate && nodemon --watch src --exec node --loader ts-node/esm src/server.ts",
     "lint": "eslint 'src/**/*.ts'"
   },
   "keywords": [],

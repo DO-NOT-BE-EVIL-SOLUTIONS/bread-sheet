@@ -14,8 +14,6 @@ services:
   server:
     build:
       context: ./server
-      args:
-        - DATABASE_URL=${DATABASE_URL}
     env_file:
       - ./server/.env
     ports:
@@ -23,10 +21,10 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=3000
+      - DATABASE_URL=postgresql://admin:password@db:5432/breadsheet
       - DB_HOST=db
       - DB_USER=admin
       - DB_PASSWORD=password
-      - DATABASE_URL=${DATABASE_URL}
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test

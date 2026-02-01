@@ -1,4 +1,4 @@
-FROM node:22-alpine
+FROM node:24-alpine
 
 WORKDIR /usr/src/app
 
@@ -7,17 +7,16 @@ RUN apk add --no-cache openssl
 
 COPY package*.json ./
 
+RUN npm install
+
 COPY . .
 
-# Reinstall dependencies to ensure Linux binaries (fixes Windows artifacts)
-RUN rm -rf node_modules && npm install
+# fake value ONLY for prisma generate
+ENV DATABASE_URL=postgresql://user:pass@localhost:5432/db
 
-# Accept the build argument passed from docker-compose
-ARG DATABASE_URL
-ENV DATABASE_URL=${DATABASE_URL}
+RUN npm run prisma:generate
+RUN npm run build:docker
 
-RUN npx prisma generate
-RUN npm run build
 EXPOSE 3000
 
-CMD ["/bin/sh", "-c", "npx prisma generate && node dist/server.js"]
+CMD ["/bin/sh", "-c", "node", " dist/server.js"]
