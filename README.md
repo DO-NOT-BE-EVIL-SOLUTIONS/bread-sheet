@@ -35,10 +35,9 @@
 
 ### Prerequisites
 
-* Node.js (v24)
-* npm or yarn
-* Expo Go app on your physical device (iOS/Android) or an Emulator.
-* Terraform (for infrastructure)
+* Server and App: Node.js (v24) with npm, and docker
+* App: Expo Go app on your physical device (iOS/Android) or an Emulator.
+* Infrastructure: Terraform
 
 ### Local Installation
 
@@ -58,7 +57,7 @@
     ```
 
 4. **Environment Setup**
-    * Create a `.env` file in the `server` directory.
+    * Create a `.env` file in the `./server` directory.
     * Add port as variable, e.g, PORT=3000
     * Add your database URL and API keys:
 

@@ -1,17 +1,23 @@
-FROM node:24-alpine
+FROM node:22-alpine
 
 WORKDIR /usr/src/app
 
-COPY package*.json ./
+# Install OpenSSL (required for Prisma on Alpine)
+RUN apk add --no-cache openssl
 
-RUN npm install
+COPY package*.json ./
 
 COPY . .
 
-# Assuming you have a build script in package.json that compiles TS to JS
-RUN npm run build
+# Reinstall dependencies to ensure Linux binaries (fixes Windows artifacts)
+RUN rm -rf node_modules && npm install
 
+# Accept the build argument passed from docker-compose
+ARG DATABASE_URL
+ENV DATABASE_URL=${DATABASE_URL}
+
+RUN npx prisma generate
+RUN npm run build
 EXPOSE 3000
 
-# Update the path below to match your compiled output location (e.g., dist/server.js)
-CMD ["node", "dist/server.js"]
+CMD ["/bin/sh", "-c", "npx prisma generate && node dist/server.js"]
