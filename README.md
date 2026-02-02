@@ -57,14 +57,7 @@
     ```
 
 4. **Environment Setup**
-    * Create a `.env` file in the project root directory.
-
-        ```env
-        PORT=3000
-        NODE_ENV=development
-        DATABASE_URL="postgresql://admin:password@db:5432/breadsheet"
-        ```
-    * Create a second `.env` file in the `./server` directory.
+    * Create an `.env` file in the `./server` directory.
 
         ```env
         PORT=3000
