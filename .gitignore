@@ -102,7 +102,7 @@ shellAppIntermediates
 shellAppWorkspaces
 /artifacts/*
 
-# Expo Client builds
+# Client builds
 /client-builds
 
 # Expo web env
@@ -138,3 +138,6 @@ tsconfig.tsbuildinfo
 # Secrets - contains real secrets fetched from GCP
 /secrets/keys.json
 /secrets/expotools.env
+
+# Prisma
+/server/src/generated

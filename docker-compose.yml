@@ -31,6 +31,7 @@ services:
       - AWS_ENDPOINT_URL=http://localstack:4566 # Points AWS SDK to LocalStack
     depends_on:
       - db
+    command: sh -c "npm run db:deploy && npm run start"
     profiles:
       - app-dev
 

@@ -57,9 +57,14 @@
     ```
 
 4. **Environment Setup**
-    * Create a `.env` file in the `./server` directory.
-    * Add port as variable, e.g, PORT=3000
-    * Add your database URL and API keys:
+    * Create a `.env` file in the project root directory.
+
+        ```env
+        PORT=3000
+        NODE_ENV=development
+        DATABASE_URL="postgresql://admin:password@db:5432/breadsheet"
+        ```
+    * Create a second `.env` file in the `./server` directory.
 
         ```env
         PORT=3000
@@ -67,23 +72,19 @@
         DATABASE_URL="postgresql://admin:password@localhost:5432/breadsheet"
         ```
 
-5. **Docker Setup**
-    From the project root:
+5. **Development with Docker**
 
-    * **Option A: Server Development** (Only Database in Docker)
+    The recommended way to run the complete backend stack (PostgreSQL database, Node.js server, and LocalStack for AWS emulation) is with a single Docker Compose command.
 
-      ```bash
-      docker compose up -d
-      ```
-
-    * **Option B: App Development** (Database & Server in Docker)
-
-      ```bash
-      docker compose --profile app-dev up -d
-      ```
-
-    * **Note on AWS:** This setup includes **LocalStack** running on port `4566`.
-      The server is pre-configured to use this for S3/Lambda calls during development.
+    From the project root, run:
+    ```bash
+    # This single command does it all:
+    # 1. Builds the server's Docker image (running `npm install` and `prisma generate`).
+    # 2. Starts the PostgreSQL database and LocalStack services.
+    # 3. Starts the server, which automatically runs database migrations on startup.
+    docker compose --profile app-dev up -d --build
+    ```
+    Your backend is now running. The server is available at `http://localhost:3000`.
 
 6. **Run the Server/App**
     * **Server:** `npm run dev` (inside `/server`)
