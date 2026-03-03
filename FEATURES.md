@@ -9,9 +9,9 @@
 - `Rating`: UserID, ProductID, taste_score, texture_score, value_score, comment.
 - `Group`: Name, invite_code.
 **Acceptance Criteria:**
-- [ ] Schema defined in `server/prisma/schema.prisma`.
-- [ ] Migration created and applied via `npx prisma migrate dev`.
-- [ ] Database tables exist in local PostgreSQL.
+- [x] Schema defined in `server/prisma/schema.prisma`.
+- [x] Migration created and applied via `npx prisma migrate dev`.
+- [x] Database tables exist in local PostgreSQL.
 Goal: Define the shape of your data in server/prisma/schema.prisma.
 Key Models:
 - `User`: ID, email (optional), username, avatar.
@@ -27,9 +27,21 @@ Key Models:
 **Acceptance Criteria:**
 - [ ] User can use app immediately as "Guest" (Anonymous).
 - [ ] User can upgrade Guest account to Email account.
-- [ ] Backend rejects requests without valid tokens.
-- [ ] Rate limiting is active on API routes.
+- [x] Backend rejects requests without valid tokens.
+- [x] Rate limiting is active on API routes.
 - [ ] User identity is available in the app state.
+
+#### Next Steps
+-  Backend: Implement Rate Limiting
+   - Action: Install express-rate-limit and apply it globally or to specific routes in your server/index.ts. 
+   - Requirement: "Rate limiting is active on API routes."
+- Frontend: Setup Supabase Client (Sign Up, Sign In, Guest Access)
+   - Action: Initialize the Supabase client in your Expo app (e.g., in bread-sheet-app/lib/supabase.ts) using your project URL and anon key.
+- Frontend: Build Auth Screens UI
+   - Action: Create the Login and Signup screens. Since you are using Supabase Auth, you should also implement the "Continue as Guest" button which triggers an anonymous sign-in.
+- Frontend: Protect Routes when to show the Login screen vs. the Main Tabs.
+   - Action: Modify bread-sheet-app/app/_layout.tsx to listen to the Supabase auth state (onAuthStateChange). If a session exists, render the (tabs); otherwise, render the (auth) stack.
+
 
 ## Phase 2: The "Scan & Discover" Loop
 

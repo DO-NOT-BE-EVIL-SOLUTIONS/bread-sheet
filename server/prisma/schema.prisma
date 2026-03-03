@@ -13,3 +13,61 @@ model Item {
 
   @@map("items")
 }
+
+model User {
+  id        String   @id @default(uuid())
+  email     String?  @unique // Optional for anonymous users
+  username  String?
+  avatar    String?
+  createdAt DateTime @default(now())
+  
+  ratings   Rating[]
+  groups    GroupMember[]
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  barcode     String   @unique
+  name        String
+  brand       String?
+  image       String?
+  description String?
+  
+  ratings     Rating[]
+}
+
+model Rating {
+  id        String   @id @default(uuid())
+  score     Int      // Overall score or calculated average
+  taste     Int?
+  texture   Int?
+  value     Int?
+  comment   String?
+  createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+}
+
+model Group {
+  id        String   @id @default(uuid())
+  name      String
+  code      String   @unique // For sharing
+  
+  members   GroupMember[]
+}
+
+model GroupMember {
+  id      String @id @default(uuid())
+  userId  String
+  groupId String
+  role    String @default("MEMBER") // ADMIN, MEMBER
+
+  user    User   @relation(fields: [userId], references: [id])
+  group   Group  @relation(fields: [groupId], references: [id])
+
+  @@unique([userId, groupId])
+}
