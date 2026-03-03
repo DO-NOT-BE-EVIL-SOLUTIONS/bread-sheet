@@ -1,11 +1,10 @@
 # Project Backlog & Tickets
-
 ## Phase 1: Data Foundation & Authentication
 
 ### [TICKET-001] Define Database Schema (Prisma)
 **Goal:** Define the shape of data in `server/prisma/schema.prisma` and initialize the database.
 **Key Models:**
-- `User`: ID, email, username, avatar.
+- `User`: ID, email (optional), username, avatar.
 - `Product`: Barcode (unique), name, brand, image_url, generic_name.
 - `Rating`: UserID, ProductID, taste_score, texture_score, value_score, comment.
 - `Group`: Name, invite_code.
@@ -13,16 +12,23 @@
 - [ ] Schema defined in `server/prisma/schema.prisma`.
 - [ ] Migration created and applied via `npx prisma migrate dev`.
 - [ ] Database tables exist in local PostgreSQL.
+Goal: Define the shape of your data in server/prisma/schema.prisma.
+Key Models:
+- `User`: ID, email (optional), username, avatar.
 
 ### [TICKET-002] Implement Authentication Strategy
-**Goal:** Secure the app and link ratings to users using Firebase Auth or Supabase Auth.
+**Goal:** Secure the app and link ratings to users using Firebase Auth or Supabase Auth with support for Anonymous Sign-In.
 **Implementation:**
 - **Backend:** Create middleware to verify tokens on protected API routes.
 - **Frontend:** Create Login/Signup screens.
+- **Backend:** Add `express-rate-limit` to prevent API abuse.
+- **Frontend:** Implement "Continue as Guest" (Anonymous Auth) and "Sign Up" (Link Account).
 - **Routing:** Modify `app/_layout.tsx` to conditionally render the main `(tabs)` or an `(auth)` stack based on login status.
 **Acceptance Criteria:**
-- [ ] User can sign up and log in.
+- [ ] User can use app immediately as "Guest" (Anonymous).
+- [ ] User can upgrade Guest account to Email account.
 - [ ] Backend rejects requests without valid tokens.
+- [ ] Rate limiting is active on API routes.
 - [ ] User identity is available in the app state.
 
 ## Phase 2: The "Scan & Discover" Loop
@@ -60,6 +66,7 @@
 - [ ] User can view product details.
 - [ ] User can adjust rating values.
 - [ ] Submit button sends `POST` request to backend.
+User History
 
 ## Phase 4: Social & History
 
