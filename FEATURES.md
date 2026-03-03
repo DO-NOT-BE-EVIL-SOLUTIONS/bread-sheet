@@ -17,7 +17,7 @@ Key Models:
 - `User`: ID, email (optional), username, avatar.
 
 ### [TICKET-002] Implement Authentication Strategy
-**Goal:** Secure the app and link ratings to users using Firebase Auth or Supabase Auth with support for Anonymous Sign-In.
+**Goal:** Secure the app and link ratings to users using Supabase Auth with support for Anonymous Sign-In.
 **Implementation:**
 - **Backend:** Create middleware to verify tokens on protected API routes.
 - **Frontend:** Create Login/Signup screens.

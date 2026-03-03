@@ -99,7 +99,7 @@ This pillar ensures that the application is deployable and that development is c
 ## 4. External Services
 
 - **Open Food Facts API:** Used to enrich product data by fetching information based on a scanned barcode. This offloads the need to maintain a massive food database internally.
-- **Firebase/Supabase Auth (Potential):** The `README.md` suggests using a managed service for authentication to simplify user management and security.
+- **Supabase Auth:** Used as the managed service for authentication to simplify user management and security, chosen for its native PostgreSQL integration.
 
 ---
 

@@ -26,7 +26,7 @@
 * **Framework:** Express.js
 * **Database:** PostgreSQL
 * **ORM:** Prisma
-* **Authentication:** Firebase Auth or Supabase Auth
+* **Authentication:** Supabase Auth
 * **External Data:** Open Food Facts API
 * **Infrastructure:** Kubernetes (Amazon EKS), AWS Database, Terraform, ArgoCD
 * **Local Dev:** Docker Compose, LocalStack (for AWS service emulation)
