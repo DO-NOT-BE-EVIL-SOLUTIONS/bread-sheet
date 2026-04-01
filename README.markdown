@@ -71,10 +71,11 @@
 
     From the project root, run:
     ```bash
-    # This single command does it all:
-    # 1. Builds the server's Docker image (running `npm install` and `prisma generate`).
-    # 2. Starts the PostgreSQL database and LocalStack services.
-    # 3. Starts the server, which automatically runs database migrations on startup.
+    # Build and start localstack and db
+    docker compose up
+    # Initialize DB and run migrations
+    npm run db:deploy 
+    # Start the server.
     docker compose --profile app-dev up -d --build
     ```
     Your backend is now running. The server is available at `http://localhost:3000`.

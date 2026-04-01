@@ -31,7 +31,13 @@ services:
       - AWS_ENDPOINT_URL=http://localstack:4566 # Points AWS SDK to LocalStack
     depends_on:
       - db
-    command: sh -c "npm run db:deploy && npm run start"
+    # Use the 'dev' script for hot-reloading with nodemon
+    command: npm run dev
+    volumes:
+      # Mount source code for hot-reloading
+      - ./server/src:/usr/src/app/src
+      # Mount prisma directory to persist schema and migration changes
+      - ./server/prisma:/usr/src/app/prisma
     profiles:
       - app-dev
 
