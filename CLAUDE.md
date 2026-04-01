@@ -58,7 +58,7 @@ cd server && npx prisma studio
 
 **Auth gate:** `app/_layout.tsx` wraps the app in `<SessionProvider>`. The session hook (`hooks/use-session.tsx`) listens to `supabase.auth.onAuthStateChange()` and drives redirects — no session → `/(auth)/login`, session → `/(tabs)`.
 
-**Supabase client** is initialized in `lib/supabase.ts` using `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`.
+**Supabase client** is initialized in `lib/supabase.ts` using `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`.
 
 **Feature modules** live in `features/` (auth, food, groups) — keep business logic there, not in route files.
 
@@ -102,13 +102,13 @@ PORT=3000
 NODE_ENV=development
 DATABASE_URL="postgresql://admin:password@localhost:5432/breadsheet"
 SUPABASE_URL=...
-SUPABASE_ANON_KEY=...
+SUPABASE_PUBLISHABLE_DEFAULT_KEY=...
 ```
 
 **Frontend (`bread-sheet-app/.env` or `app.config.js`):**
 ```
 EXPO_PUBLIC_SUPABASE_URL=...
-EXPO_PUBLIC_SUPABASE_ANON_KEY=...
+EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=...
 ```
 
 ## ADRs

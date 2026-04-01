@@ -57,12 +57,24 @@
     ```
 
 4. **Environment Setup**
-    * Create an `.env` file in the `./server` directory.
+
+    This project requires a [Supabase](https://supabase.com) project for authentication. Create a free project at supabase.com, then find your **Project URL** and **anon/public key** under **Project Settings → API**. Additionally enable anonymous login for the project.
+
+    * Create a `./server/.env` file:
 
         ```env
         PORT=3000
         NODE_ENV=development
         DATABASE_URL="postgresql://admin:password@localhost:5432/breadsheet"
+        SUPABASE_URL=https://<your-project-ref>.supabase.co
+        SUPABASE_PUBLISHABLE_DEFAULT_KEY=<your-anon-key>
+        ```
+
+    * Create a `./bread-sheet-app/.env` file:
+
+        ```env
+        EXPO_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
+        EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=<your-anon-key>
         ```
 
 5. **Development with Docker**
