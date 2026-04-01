@@ -141,3 +141,5 @@ tsconfig.tsbuildinfo
 
 # Prisma
 /server/src/generated
+server/combined.log
+server/error.log
