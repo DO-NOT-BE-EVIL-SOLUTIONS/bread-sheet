@@ -28,14 +28,14 @@
     "express": "^5.2.1",
     "nodemon": "^3.1.11",
     "prettier": "^3.8.1",
-    "prisma": "^7.3.0",
+    "prisma": "^7.6.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.975.0",
     "@prisma/adapter-pg": "^7.3.0",
-    "@prisma/client": "^7.3.0",
+    "@prisma/client": "^7.6.0",
     "@supabase/supabase-js": "^2.98.0",
     "express-rate-limit": "^8.2.1",
     "pg": "^8.17.2",

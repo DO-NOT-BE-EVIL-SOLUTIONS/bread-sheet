@@ -81,7 +81,7 @@
     Your backend is now running. The server is available at `http://localhost:3000`.
 
 6. **Run the Server/App**
-    * **Server:** `npm run dev` (inside `/server`)
+    * **Server:** Inside `/server`: `npm run db:deploy` if database changed or needs initialization, afterwards `npm run dev`
     * **Client:** `npx expo start` (inside `/client`)
 
 ### Infrastructure (Terraform)
