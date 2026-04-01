@@ -82,7 +82,7 @@
 
 6. **Run the Server/App**
     * **Server:** Inside `/server`: `npm run db:deploy` if database changed or needs initialization, afterwards `npm run dev`
-    * **Client:** `npx expo start` (inside `/client`)
+    * **Client:** `npx expo start` (inside `/bread-sheet-app`)
 
 ### Infrastructure (Terraform)
 
