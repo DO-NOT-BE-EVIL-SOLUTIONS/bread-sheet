@@ -9,6 +9,11 @@ services:
       - POSTGRES_DB=breadsheet
     volumes:
       - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d breadsheet"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # Server: Only starts in 'app-dev' profile
   server:
@@ -30,9 +35,10 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_ENDPOINT_URL=http://localstack:4566 # Points AWS SDK to LocalStack
     depends_on:
-      - db
-    # Use the 'dev' script for hot-reloading with nodemon
-    command: npm run dev
+      db:
+        condition: service_healthy
+    # Run migrations then start dev server with hot-reloading
+    command: sh -c "npm run db:deploy && npm run dev"
     volumes:
       # Mount source code for hot-reloading
       - ./server/src:/usr/src/app/src
