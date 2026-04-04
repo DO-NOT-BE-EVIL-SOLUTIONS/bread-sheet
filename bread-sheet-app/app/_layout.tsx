@@ -9,6 +9,9 @@ import { useEffect } from 'react';
 export const unstable_settings = {
   initialRouteName: '(tabs)',
 };
+
+const AUTHENTICATED_GROUPS = ['(tabs)', '(app)'];
+
 function RootLayoutNav() {
   const { session, isLoading } = useSession();
   const segments = useSegments();
@@ -16,17 +19,20 @@ function RootLayoutNav() {
 
   useEffect(() => {
     if (isLoading) return;
-    const inTabsGroup = segments[0] === '(tabs)';
-    if (session && !inTabsGroup) {
+    const inAuthenticatedGroup = AUTHENTICATED_GROUPS.includes(segments[0] as string);
+    if (session && !inAuthenticatedGroup) {
       router.replace('/(tabs)');
     } else if (!session) {
       router.replace('/(auth)/login');
     }
-  }, [session, isLoading]);
+  }, [session, isLoading, segments]);
+
+  if (isLoading) return null;
 
   return (
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="(app)" options={{ headerShown: false }} />
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>

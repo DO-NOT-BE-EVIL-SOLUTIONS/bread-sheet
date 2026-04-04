@@ -28,10 +28,10 @@ Key Models:
 **Acceptance Criteria:**
 - [ ] User can use app immediately as "Guest" (Anonymous).
 - [ ] User can upgrade Guest account to Email account.
-- [x] Backend rejects requests without valid tokens.
+- [ ] Backend rejects requests without valid tokens.
 - [x] Rate limiting is active on API routes.
 - [ ] User identity is available in the app state.
-- [] Setup Supabase working for local development and for cloud deployment.
+- [ ] Setup Supabase working for local development and for cloud deployment.
 
 #### Next Steps
 -  Backend: Implement Rate Limiting
