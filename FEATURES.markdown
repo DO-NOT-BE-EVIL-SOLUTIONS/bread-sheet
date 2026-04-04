@@ -27,22 +27,11 @@ Key Models:
 - **Local and Cloud Setup of Supabase** Setup Supabase working for local development and for cloud deployment.
 **Acceptance Criteria:**
 - [x] User can use app immediately as "Guest" (Anonymous).
-- [ ] User can upgrade Guest account to Email account.
-- [ ] Backend rejects requests without valid tokens.
+- [x] User can upgrade Guest account to Email account.
+- [x] Backend rejects requests without valid tokens.
 - [x] Rate limiting is active on API routes.
-- [ ] User identity is available in the app state.
+- [x] User identity is available in the app state.
 - [x] Setup Supabase working for local development and for cloud deployment. -> Use DEV Supabase stage for development
-
-#### Next Steps
--  Backend: Implement Rate Limiting
-   - Action: Install express-rate-limit and apply it globally or to specific routes in your server/index.ts. 
-   - Requirement: "Rate limiting is active on API routes."
-- Frontend: Setup Supabase Client (Sign Up, Sign In, Guest Access)
-   - Action: Initialize the Supabase client in your Expo app (e.g., in bread-sheet-app/lib/supabase.ts) using your project URL and anon key.
-- Frontend: Build Auth Screens UI
-   - Action: Create the Login and Signup screens. Since you are using Supabase Auth, you should also implement the "Continue as Guest" button which triggers an anonymous sign-in.
-- Frontend: Protect Routes when to show the Login screen vs. the Main Tabs.
-   - Action: Modify bread-sheet-app/app/_layout.tsx to listen to the Supabase auth state (onAuthStateChange). If a session exists, render the (tabs); otherwise, render the (auth) stack.
 
 
 ## Phase 2: The "Scan & Discover" Loop
@@ -102,3 +91,22 @@ User History
 - [ ] User can create a group.
 - [ ] User can join a group with a code.
 - [ ] Ratings can be filtered by group context.
+
+## Phase 5: Auth Enhancements
+
+### [TICKET-008] Social Login Providers (Google, Apple)
+**Goal:** Allow users to sign in and upgrade guest accounts using OAuth providers, reducing friction compared to email/password.
+**Implementation:**
+- **Supabase:** Enable Google and Apple providers in the Supabase dashboard. Configure OAuth credentials from Google Cloud Console and Apple Developer Console.
+- **Frontend (web):** Use `supabase.auth.signInWithOAuth()` for redirect-based flow — add to `features/auth/`.
+- **Frontend (native):** Web redirect flow does not work on native. Use `expo-auth-session` (Google) and `expo-apple-authentication` (Apple) to obtain tokens natively, then exchange via `supabase.auth.signInWithIdToken()`.
+- **Anonymous upgrade:** Extend the upgrade screen with provider buttons using `supabase.auth.linkIdentity()` as an alternative to the email/password path.
+- **Platform branching:** `features/auth/` will need platform-aware logic (`Platform.OS`) for web vs native OAuth paths.
+**Notes:**
+- Apple Sign In is mandatory on iOS if any other third-party social login is offered (App Store guideline 4.8).
+- Google and Apple must both ship together on iOS for compliance.
+**Acceptance Criteria:**
+- [ ] User can sign in with Google on web and native.
+- [ ] User can sign in with Apple on iOS.
+- [ ] Anonymous user can link a Google or Apple account from the upgrade screen.
+- [ ] Linking a provider to an existing anonymous account preserves all user data.

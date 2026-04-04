@@ -24,9 +24,9 @@ export const userLimiter = rateLimit({
 });
 
 // Strict per-IP limiter for the user sync endpoint.
-// Replaces the old authLimiter which was applied to /api/auth (a path that doesn't exist).
+// Relaxed in development to avoid hitting the limit during hot-reloads.
 export const syncLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === 'production' ? 20 : 500,
   message: { status: 429, message: 'Too many sync attempts, please try again later.' },
 });

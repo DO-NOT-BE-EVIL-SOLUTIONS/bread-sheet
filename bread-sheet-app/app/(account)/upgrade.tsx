@@ -23,7 +23,6 @@ export default function UpgradeScreen() {
   const [emailError, setEmailError] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
 
   async function upgrade() {
     if (!isValidEmail(email)) {
@@ -32,35 +31,12 @@ export default function UpgradeScreen() {
     }
     setLoading(true);
     const { error } = await upgradeAccount(email, password);
+    setLoading(false);
     if (error) {
       Alert.alert('Upgrade failed', error.message);
-      setLoading(false);
       return;
     }
-    setDone(true);
-    setLoading(false);
-  }
-
-  if (done) {
-    return (
-      <ThemedView style={styles.successContainer}>
-        <ThemedText style={styles.icon}>📬</ThemedText>
-        <ThemedText type="title" style={styles.title}>Check your inbox</ThemedText>
-        <ThemedText style={styles.subtitle}>
-          We sent a verification link to{'\n'}
-          <ThemedText style={styles.emailText}>{email}</ThemedText>
-        </ThemedText>
-        <ThemedText style={styles.hint}>
-          Click the link to activate your account. Your guest data is safe.
-        </ThemedText>
-        <TouchableOpacity
-          style={[styles.primaryButton, { backgroundColor: tint }]}
-          onPress={() => router.back()}
-        >
-          <ThemedText style={styles.primaryButtonText}>Done</ThemedText>
-        </TouchableOpacity>
-      </ThemedView>
-    );
+    router.replace({ pathname: '/(account)/verify-email', params: { email } });
   }
 
   return (
@@ -166,25 +142,5 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     fontSize: 14,
-  },
-  successContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    gap: 16,
-  },
-  icon: {
-    fontSize: 56,
-    marginBottom: 8,
-  },
-  emailText: {
-    fontWeight: '600',
-  },
-  hint: {
-    textAlign: 'center',
-    opacity: 0.5,
-    fontSize: 14,
-    lineHeight: 20,
   },
 });

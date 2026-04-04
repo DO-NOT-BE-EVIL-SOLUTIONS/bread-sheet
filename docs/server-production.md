@@ -15,6 +15,13 @@
 - [ ] Confirm RDS security group only accepts connections from EKS node group, not public internet
 - [ ] Enable RDS automated backups and set retention period
 
+## Email (SMTP)
+
+- [ ] Configure a custom SMTP provider in Supabase dashboard (Settings → Auth → SMTP). The free tier caps outbound auth emails at 3 per hour — this will break the signup and account upgrade flows under any real usage
+- [ ] Recommended providers: Resend, Mailgun, or AWS SES (already in the stack)
+- [ ] Configure auth email templates (verification, password reset) with production branding and a `Reply-To` address
+- [ ] Confirm the `From` address matches a domain with valid SPF/DKIM records to avoid spam filtering
+
 ## Security
 
 - [ ] Verify `ALLOWED_ORIGINS` is set — the CORS default allows localhost only, production will block the app otherwise
