@@ -52,9 +52,9 @@ Key Models:
 **Tech:** `expo-camera`.
 **UI:** A dedicated tab or modal (accessible from FAB) that opens the camera.
 **Acceptance Criteria:**
-- [ ] Camera permission handling.
-- [ ] Successful scan captures barcode string.
-- [ ] Navigation to **Product Detail** screen upon scan.
+- [x] Camera permission handling.
+- [x] Successful scan captures barcode string.
+- [x] Navigation to **Product Detail** screen upon scan.
 
 ## Phase 3: The Rating Core
 
