@@ -18,12 +18,16 @@ export interface ProductData {
   description: string | null;
 }
 
+// Returns null if the product does not exist in OFF.
+// Throws if the OFF API itself is unavailable or returns an error.
 export async function fetchFromOpenFoodFacts(barcode: string): Promise<ProductData | null> {
   const res = await fetch(`${OFF_API}/${barcode}?fields=product_name,brands,image_url,generic_name`, {
     signal: AbortSignal.timeout(5000),
   });
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    throw new Error(`Open Food Facts API error: ${res.status} ${res.statusText}`);
+  }
 
   const data = await res.json() as OFFResponse;
 

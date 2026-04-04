@@ -44,8 +44,8 @@ Key Models:
 - Step 2: If missing, fetch from Open Food Facts API.
 - Step 3: Save to local DB (cache) and return to client.
 **Acceptance Criteria:**
-- [ ] API returns product data for valid barcodes.
-- [ ] Data is cached in the `Product` table after the first fetch.
+- [x] API returns product data for valid barcodes.
+- [x] Data is cached in the `Product` table after the first fetch.
 
 ### [TICKET-004] Barcode Scanner (Frontend)
 **Goal:** Allow the user to scan a product using the device camera.
