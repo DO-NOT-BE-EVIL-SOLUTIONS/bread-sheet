@@ -94,7 +94,7 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="person.badge.plus"
               label="Create Account"
-              onPress={() => router.push('/(app)/upgrade')}
+              onPress={() => router.push('/(account)/upgrade')}
               tint={tint}
             />
           </View>
@@ -110,14 +110,14 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="envelope.fill"
               label="Change Email"
-              onPress={() => router.push('/(app)/change-email')}
+              onPress={() => router.push('/(account)/change-email')}
               tint={tint}
             />
             <View style={[styles.separator, { backgroundColor: Colors[colorScheme].icon + '30' }]} />
             <SettingsRow
               icon="lock.fill"
               label="Change Password"
-              onPress={() => router.push('/(app)/change-password')}
+              onPress={() => router.push('/(account)/change-password')}
               tint={tint}
             />
           </View>

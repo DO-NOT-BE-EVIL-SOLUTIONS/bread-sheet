@@ -13,7 +13,7 @@ bread-sheet-app/
 ├── app/                    # Expo Router file-based routes (screens only — no business logic)
 │   ├── (auth)/             # Unauthenticated route group (login, signup, post-signup flows)
 │   ├── (tabs)/             # Primary authenticated tab navigation
-│   └── (app)/              # Authenticated screens rendered without the tab bar
+│   └── (account)/              # Authenticated screens rendered without the tab bar
 ├── features/               # Business logic grouped by domain
 │   └── auth/               # Auth actions and validation (no UI)
 ├── hooks/                  # React context and custom hooks
@@ -33,7 +33,7 @@ Expo Router maps the file system to routes. Route groups (folders wrapped in par
 |-------|--------------|--------|
 | `(auth)/` | No | Stack navigator, no header |
 | `(tabs)/` | Yes | Bottom tab bar |
-| `(app)/` | Yes | Stack navigator, no tab bar |
+| `(account)/` | Yes | Stack navigator, no tab bar |
 
 ---
 
@@ -50,7 +50,7 @@ hooks/use-session.tsx        ← Session state + real-time subscription
        ↓
 app/_layout.tsx              ← Navigation guard (redirects based on session)
        ↓
-app/(auth)/ + app/(app)/     ← Screens — call features/auth, handle UI only
+app/(auth)/ + app/(account)/     ← Screens — call features/auth, handle UI only
 ```
 
 ### 1. Supabase Client — `lib/supabase.ts`
@@ -98,7 +98,7 @@ session + not in authenticated group    → router.replace('/(tabs)')
 no session                              → router.replace('/(auth)/login')
 ```
 
-Authenticated groups are `(tabs)` and `(app)`. Any new authenticated route group must be added to the `AUTHENTICATED_GROUPS` constant in `app/_layout.tsx`.
+Authenticated groups are `(tabs)` and `(account)`. Any new authenticated route group must be added to the `AUTHENTICATED_GROUPS` constant in `app/_layout.tsx`.
 
 ---
 
@@ -156,12 +156,12 @@ The **Profile tab** is a settings-style screen that adapts to the user's account
 
 **Guest users** see:
 - Avatar with "?" and "Guest account" label
-- "Create Account" row leading to the upgrade flow in `(app)/`
+- "Create Account" row leading to the upgrade flow in `(account)/`
 - Sign Out (warns about data loss)
 
 **Registered users** see:
 - Avatar with email initial and email address
-- "Change Email" and "Change Password" rows, both in `(app)/`
+- "Change Email" and "Change Password" rows, both in `(account)/`
 - Sign Out
 
 On web, confirmation dialogs use `window.confirm` since `Alert.alert` with buttons is not supported. On native, `Alert.alert` is used.

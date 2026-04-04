@@ -10,7 +10,7 @@ export const unstable_settings = {
   initialRouteName: '(tabs)',
 };
 
-const AUTHENTICATED_GROUPS = ['(tabs)', '(app)'];
+const AUTHENTICATED_GROUPS = ['(tabs)', '(account)'];
 
 function RootLayoutNav() {
   const { session, isLoading } = useSession();
@@ -32,7 +32,7 @@ function RootLayoutNav() {
   return (
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="(app)" options={{ headerShown: false }} />
+      <Stack.Screen name="(account)" options={{ headerShown: false }} />
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>
