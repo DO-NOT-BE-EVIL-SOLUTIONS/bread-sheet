@@ -23,6 +23,7 @@ const MAPPING = {
   'envelope.fill': 'email',
   'arrow.right.square': 'logout',
   'person.badge.plus': 'person-add',
+  'barcode.viewfinder': 'qr-code-scanner',
 } as IconMapping;
 
 /**

@@ -43,7 +43,7 @@ export default function ScanScreen() {
       />
 
       {/* Dimmed overlay with viewfinder cutout */}
-      <View style={styles.overlay} pointerEvents="none">
+      <View style={[styles.overlay, { pointerEvents: 'none' }]}>
         <View style={styles.overlayTop} />
         <View style={styles.overlayMiddle}>
           <View style={styles.overlaySide} />
