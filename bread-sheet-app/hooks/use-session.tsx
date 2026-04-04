@@ -5,9 +5,11 @@ import {type ReactNode, createContext, useContext, useEffect, useState} from 're
 const SessionContext = createContext<{
     session: Session | null;
     isLoading: boolean;
+    isAnonymous: boolean;
 }>({
     session: null,
     isLoading: true,
+    isAnonymous: false,
 });
 
 export function useSession() {
@@ -34,7 +36,7 @@ export function SessionProvider({children}: { children: ReactNode }) {
     }, []);
 
     return (
-        <SessionContext.Provider value={{session, isLoading}}>
+        <SessionContext.Provider value={{session, isLoading, isAnonymous: session?.user.is_anonymous ?? false}}>
             {children}
         </SessionContext.Provider>
     );

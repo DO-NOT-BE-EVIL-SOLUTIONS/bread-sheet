@@ -3,7 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { supabase } from '@/lib/supabase';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
@@ -14,27 +14,28 @@ import {
   TouchableOpacity,
 } from 'react-native';
 
-export default function LoginScreen() {
+export default function UpgradeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const router = useRouter();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [loadingGuest, setLoadingGuest] = useState(false);
 
-  async function signInWithEmail() {
+  async function upgrade() {
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) Alert.alert('Login failed', error.message);
+    const { error } = await supabase.auth.updateUser({ email, password });
+    if (error) {
+      Alert.alert('Upgrade failed', error.message);
+    } else {
+      Alert.alert(
+        'Check your email',
+        'We sent a verification link to ' + email + '. Verify it to complete your account.',
+        [{ text: 'OK', onPress: () => router.back() }],
+      );
+    }
     setLoading(false);
-  }
-
-  async function signInAnonymously() {
-    setLoadingGuest(true);
-    const { error } = await supabase.auth.signInAnonymously();
-    if (error) Alert.alert('Guest sign-in failed', error.message);
-    setLoadingGuest(false);
   }
 
   return (
@@ -43,8 +44,11 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ThemedView style={styles.container}>
-        <ThemedText type="title" style={styles.title}>Welcome back</ThemedText>
-        <ThemedText style={styles.subtitle}>Sign in to your account</ThemedText>
+        <ThemedText type="title" style={styles.title}>Save your account</ThemedText>
+        <ThemedText style={styles.subtitle}>
+          Add an email and password to keep your ratings and groups across devices.
+          Your guest data won't be lost.
+        </ThemedText>
 
         <TextInput
           style={[styles.input, { borderColor: Colors[colorScheme].icon, color: Colors[colorScheme].text }]}
@@ -63,32 +67,24 @@ export default function LoginScreen() {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
-          autoComplete="password"
+          autoComplete="new-password"
         />
 
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: tint }, loading && styles.disabled]}
-          onPress={signInWithEmail}
+          onPress={upgrade}
           disabled={loading}
         >
           <ThemedText style={styles.primaryButtonText}>
-            {loading ? 'Signing in…' : 'Sign In'}
+            {loading ? 'Saving…' : 'Save Account'}
           </ThemedText>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.secondaryButton, { borderColor: tint }, loadingGuest && styles.disabled]}
-          onPress={signInAnonymously}
-          disabled={loadingGuest}
-        >
-          <ThemedText style={[styles.secondaryButtonText, { color: tint }]}>
-            {loadingGuest ? 'Loading…' : 'Continue as Guest'}
+        <TouchableOpacity onPress={() => router.back()} style={styles.cancelButton}>
+          <ThemedText style={[styles.cancelText, { color: Colors[colorScheme].icon }]}>
+            Maybe later
           </ThemedText>
         </TouchableOpacity>
-
-        <Link href="/(auth)/signup" style={[styles.link, { color: tint }]}>
-          Don't have an account? Sign up
-        </Link>
       </ThemedView>
     </KeyboardAvoidingView>
   );
@@ -110,6 +106,7 @@ const styles = StyleSheet.create({
   subtitle: {
     opacity: 0.6,
     marginBottom: 8,
+    lineHeight: 22,
   },
   input: {
     borderWidth: 1,
@@ -129,22 +126,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
-  secondaryButton: {
-    borderRadius: 8,
-    borderWidth: 1.5,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  secondaryButtonText: {
-    fontWeight: '600',
-    fontSize: 16,
-  },
   disabled: {
     opacity: 0.5,
   },
-  link: {
-    textAlign: 'center',
-    marginTop: 8,
+  cancelButton: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  cancelText: {
     fontSize: 14,
   },
 });

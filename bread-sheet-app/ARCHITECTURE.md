@@ -20,8 +20,13 @@ bread-sheet-app/
 │   ├── (tabs)/             # Primary authenticated tab navigation
 │   │   ├── _layout.tsx
 │   │   ├── index.tsx       # Home tab
-│   │   └── explore.tsx     # Explore tab
-│   └── (app)/              # Secondary authenticated screens (no tab bar)
+│   │   ├── explore.tsx     # Explore tab
+│   │   └── profile.tsx     # Profile / account settings tab
+│   └── (app)/              # Authenticated screens without tab bar
+│       ├── _layout.tsx
+│       ├── upgrade.tsx         # Guest → registered account upgrade
+│       ├── change-email.tsx    # Change email (registered users)
+│       └── change-password.tsx # Change password (registered users)
 ├── hooks/
 │   ├── use-session.tsx     # Supabase session context + provider
 │   ├── use-color-scheme.ts
@@ -33,7 +38,7 @@ bread-sheet-app/
 │   ├── themed-view.tsx
 │   ├── parallax-scroll-view.tsx
 │   └── ui/
-│       ├── icon-symbol.tsx
+│       ├── icon-symbol.tsx     # SF Symbols (iOS) / Material Icons (Android/web)
 │       └── collapsible.tsx
 ├── features/               # Feature modules (auth, food, groups)
 └── constants/
@@ -79,7 +84,13 @@ Throws at startup if either var is missing. Imported wherever Supabase calls are
 
 ### 2. Session Context — [`hooks/use-session.tsx`](hooks/use-session.tsx)
 
-`SessionProvider` wraps the app and exposes `{ session, isLoading }` via React context.
+`SessionProvider` wraps the app and exposes `{ session, isLoading, isAnonymous }` via React context.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session` | `Session \| null` | Full Supabase session (includes `session.user`) |
+| `isLoading` | `boolean` | `true` until the initial session restore completes |
+| `isAnonymous` | `boolean` | `true` when the signed-in user is a guest (no email) |
 
 On mount it:
 1. Calls `supabase.auth.getSession()` to restore any persisted session (handles app re-opens)
@@ -92,9 +103,9 @@ On mount it:
 `RootLayoutNav` runs a `useEffect` whenever `session`, `isLoading`, or `segments` changes:
 
 ```
-isLoading = true       → render null (splash/loading state)
-session + not in authenticated group → router.replace('/(tabs)')
-no session             → router.replace('/(auth)/login')
+isLoading = true                        → render null (splash/loading state)
+session + not in authenticated group    → router.replace('/(tabs)')
+no session                              → router.replace('/(auth)/login')
 ```
 
 Authenticated groups are `(tabs)` and `(app)`. Any new authenticated route group must be added to the `AUTHENTICATED_GROUPS` constant in `_layout.tsx`.
@@ -108,7 +119,7 @@ Authenticated groups are `(tabs)` and `(app)`. Any new authenticated route group
 ```
 supabase.auth.signInAnonymously()
   → onAuthStateChange fires
-  → session becomes non-null
+  → session becomes non-null, isAnonymous = true
   → guard redirects to /(tabs)
 ```
 
@@ -127,9 +138,40 @@ supabase.auth.signUp({ email, password })
   → email verification required before session is active
 ```
 
-### Sign Up (upgrading a guest)
+### Upgrade (guest → registered)
 
-If the current user is anonymous, signup calls `supabase.auth.updateUser()` instead of `signUp()`, preserving the existing user record and any data associated with it.
+Anonymous users can link an email and password to their existing account from the Profile tab. This preserves all their data — the Supabase user ID stays the same.
+
+```
+supabase.auth.updateUser({ email, password })   # called from (app)/upgrade.tsx
+  → verification email sent to new address
+  → on verification: isAnonymous becomes false, profile screen updates
+```
+
+---
+
+## Profile & Account Management
+
+The **Profile tab** (`(tabs)/profile.tsx`) is a settings-style screen that adapts to the user's account state:
+
+**Guest users** see:
+- Avatar with "?" and "Guest account" label
+- "Create Account" row linking to `(app)/upgrade.tsx`
+- Sign Out
+
+**Registered users** see:
+- Avatar with email initial and email address
+- "Change Email" → `(app)/change-email.tsx`
+- "Change Password" → `(app)/change-password.tsx`
+- Sign Out
+
+The tab bar icon shows a small orange badge when the user is a guest, prompting them to upgrade without blocking the experience.
+
+---
+
+## Icons
+
+`components/ui/icon-symbol.tsx` bridges SF Symbols (iOS) and Material Icons (Android/web). New icons require a mapping entry in the `MAPPING` object in that file.
 
 ---
 
@@ -144,3 +186,4 @@ If the current user is anonymous, signup calls `supabase.auth.updateUser()` inst
 - **Feature logic** belongs in `features/` modules, not in route files. Route files should only wire up UI and call into feature modules.
 - **Supabase is the single source of truth** for auth state — never manage session tokens manually.
 - **New authenticated route groups** must be added to `AUTHENTICATED_GROUPS` in `app/_layout.tsx` to avoid being redirected back to `/(tabs)`.
+- **`isAnonymous`** from `useSession()` is the canonical way to branch UI between guest and registered users — do not inspect `session.user` directly.

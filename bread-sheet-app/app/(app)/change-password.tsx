@@ -3,7 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { supabase } from '@/lib/supabase';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
@@ -14,21 +14,33 @@ import {
   TouchableOpacity,
 } from 'react-native';
 
-export default function SignUpScreen() {
+export default function ChangePasswordScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const router = useRouter();
 
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
 
-  async function signUpWithEmail() {
+  async function changePassword() {
+    if (password !== confirm) {
+      Alert.alert('Passwords do not match');
+      return;
+    }
     setLoading(true);
-    const { data: { session }, error } = await supabase.auth.signUp({ email, password });
-    if (error) Alert.alert('Sign up failed', error.message);
-    else if (!session) Alert.alert('Check your email', 'We sent a verification link to ' + email);
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      Alert.alert('Failed to update password', error.message);
+    } else {
+      Alert.alert('Password updated', 'Your password has been changed.', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    }
     setLoading(false);
   }
+
+  const canSubmit = password.length >= 6 && password === confirm;
 
   return (
     <KeyboardAvoidingView
@@ -36,63 +48,55 @@ export default function SignUpScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ThemedView style={styles.container}>
-        <ThemedText type="title" style={styles.title}>Create account</ThemedText>
-        <ThemedText style={styles.subtitle}>Start rating food with your friends</ThemedText>
+        <ThemedText style={styles.description}>
+          Choose a new password. It must be at least 6 characters.
+        </ThemedText>
 
         <TextInput
           style={[styles.input, { borderColor: Colors[colorScheme].icon, color: Colors[colorScheme].text }]}
-          placeholder="Email"
-          placeholderTextColor={Colors[colorScheme].icon}
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          autoComplete="email"
-        />
-        <TextInput
-          style={[styles.input, { borderColor: Colors[colorScheme].icon, color: Colors[colorScheme].text }]}
-          placeholder="Password"
+          placeholder="New password"
           placeholderTextColor={Colors[colorScheme].icon}
           value={password}
           onChangeText={setPassword}
           secureTextEntry
           autoComplete="new-password"
+          autoFocus
+        />
+        <TextInput
+          style={[styles.input, { borderColor: Colors[colorScheme].icon, color: Colors[colorScheme].text }]}
+          placeholder="Confirm new password"
+          placeholderTextColor={Colors[colorScheme].icon}
+          value={confirm}
+          onChangeText={setConfirm}
+          secureTextEntry
+          autoComplete="new-password"
         />
 
         <TouchableOpacity
-          style={[styles.primaryButton, { backgroundColor: tint }, loading && styles.disabled]}
-          onPress={signUpWithEmail}
-          disabled={loading}
+          style={[styles.primaryButton, { backgroundColor: tint }, (!canSubmit || loading) && styles.disabled]}
+          onPress={changePassword}
+          disabled={!canSubmit || loading}
         >
           <ThemedText style={styles.primaryButtonText}>
-            {loading ? 'Creating account…' : 'Sign Up'}
+            {loading ? 'Updating…' : 'Update Password'}
           </ThemedText>
         </TouchableOpacity>
-
-        <Link href="/(auth)/login" style={[styles.link, { color: tint }]}>
-          Already have an account? Sign in
-        </Link>
       </ThemedView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  keyboardView: {
-    flex: 1,
-  },
+  keyboardView: { flex: 1 },
   container: {
     flex: 1,
-    justifyContent: 'center',
     paddingHorizontal: 24,
-    gap: 12,
+    paddingTop: 24,
+    gap: 14,
   },
-  title: {
-    marginBottom: 4,
-  },
-  subtitle: {
+  description: {
     opacity: 0.6,
-    marginBottom: 8,
+    lineHeight: 22,
   },
   input: {
     borderWidth: 1,
@@ -112,12 +116,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
-  disabled: {
-    opacity: 0.5,
-  },
-  link: {
-    textAlign: 'center',
-    marginTop: 8,
-    fontSize: 14,
-  },
+  disabled: { opacity: 0.5 },
 });

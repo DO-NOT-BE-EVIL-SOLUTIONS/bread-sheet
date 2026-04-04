@@ -26,12 +26,12 @@ Key Models:
 - **Routing:** Modify `app/_layout.tsx` to conditionally render the main `(tabs)` or an `(auth)` stack based on login status.
 - **Local and Cloud Setup of Supabase** Setup Supabase working for local development and for cloud deployment.
 **Acceptance Criteria:**
-- [ ] User can use app immediately as "Guest" (Anonymous).
+- [x] User can use app immediately as "Guest" (Anonymous).
 - [ ] User can upgrade Guest account to Email account.
 - [ ] Backend rejects requests without valid tokens.
 - [x] Rate limiting is active on API routes.
 - [ ] User identity is available in the app state.
-- [ ] Setup Supabase working for local development and for cloud deployment.
+- [x] Setup Supabase working for local development and for cloud deployment. -> Use DEV Supabase stage for development
 
 #### Next Steps
 -  Backend: Implement Rate Limiting
