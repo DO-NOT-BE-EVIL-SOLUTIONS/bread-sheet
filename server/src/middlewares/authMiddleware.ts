@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 // Initialize Supabase client
 // Ensure these are in your server/.env file
 const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+const supabaseKey = process.env.SUPABASE_PUBLISHABLE_DEFAULT_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Extend Express Request type to include user
