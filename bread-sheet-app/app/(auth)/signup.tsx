@@ -2,8 +2,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { supabase } from '@/lib/supabase';
-import { Link } from 'expo-router';
+import { isValidEmail, signUp } from '@/features/auth';
+import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
@@ -17,16 +17,22 @@ import {
 export default function SignUpScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const router = useRouter();
 
   const [email, setEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function signUpWithEmail() {
+    if (!isValidEmail(email)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
     setLoading(true);
-    const { data: { session }, error } = await supabase.auth.signUp({ email, password });
+    const { data: { session }, error } = await signUp(email, password);
     if (error) Alert.alert('Sign up failed', error.message);
-    else if (!session) Alert.alert('Check your email', 'We sent a verification link to ' + email);
+    else if (!session) router.replace({ pathname: '/(auth)/verify-email', params: { email } });
     setLoading(false);
   }
 
@@ -44,11 +50,12 @@ export default function SignUpScreen() {
           placeholder="Email"
           placeholderTextColor={Colors[colorScheme].icon}
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(v) => { setEmail(v); setEmailError(''); }}
           autoCapitalize="none"
           keyboardType="email-address"
           autoComplete="email"
         />
+        {emailError ? <ThemedText style={styles.fieldError}>{emailError}</ThemedText> : null}
         <TextInput
           style={[styles.input, { borderColor: Colors[colorScheme].icon, color: Colors[colorScheme].text }]}
           placeholder="Password"
@@ -119,5 +126,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     fontSize: 14,
+  },
+  fieldError: {
+    color: '#e53e3e',
+    fontSize: 13,
+    marginTop: -4,
   },
 });

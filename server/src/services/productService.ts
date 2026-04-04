@@ -19,11 +19,13 @@ export interface ProductData {
 }
 
 export async function fetchFromOpenFoodFacts(barcode: string): Promise<ProductData | null> {
-  const res = await fetch(`${OFF_API}/${barcode}?fields=product_name,brands,image_url,generic_name`);
+  const res = await fetch(`${OFF_API}/${barcode}?fields=product_name,brands,image_url,generic_name`, {
+    signal: AbortSignal.timeout(5000),
+  });
 
   if (!res.ok) return null;
 
-  const data: OFFResponse = await res.json();
+  const data = await res.json() as OFFResponse;
 
   if (data.status !== 1 || !data.product) return null;
 

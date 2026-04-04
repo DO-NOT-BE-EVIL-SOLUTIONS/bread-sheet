@@ -2,7 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { supabase } from '@/lib/supabase';
+import { isValidEmail, signIn, signInAsGuest } from '@/features/auth';
 import { Link } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -19,20 +19,25 @@ export default function LoginScreen() {
   const tint = Colors[colorScheme].tint;
 
   const [email, setEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingGuest, setLoadingGuest] = useState(false);
 
   async function signInWithEmail() {
+    if (!isValidEmail(email)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await signIn(email, password);
     if (error) Alert.alert('Login failed', error.message);
     setLoading(false);
   }
 
-  async function signInAnonymously() {
+  async function handleGuestSignIn() {
     setLoadingGuest(true);
-    const { error } = await supabase.auth.signInAnonymously();
+    const { error } = await signInAsGuest();
     if (error) Alert.alert('Guest sign-in failed', error.message);
     setLoadingGuest(false);
   }
@@ -51,11 +56,12 @@ export default function LoginScreen() {
           placeholder="Email"
           placeholderTextColor={Colors[colorScheme].icon}
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(v) => { setEmail(v); setEmailError(''); }}
           autoCapitalize="none"
           keyboardType="email-address"
           autoComplete="email"
         />
+        {emailError ? <ThemedText style={styles.fieldError}>{emailError}</ThemedText> : null}
         <TextInput
           style={[styles.input, { borderColor: Colors[colorScheme].icon, color: Colors[colorScheme].text }]}
           placeholder="Password"
@@ -78,7 +84,7 @@ export default function LoginScreen() {
 
         <TouchableOpacity
           style={[styles.secondaryButton, { borderColor: tint }, loadingGuest && styles.disabled]}
-          onPress={signInAnonymously}
+          onPress={handleGuestSignIn}
           disabled={loadingGuest}
         >
           <ThemedText style={[styles.secondaryButtonText, { color: tint }]}>
@@ -146,5 +152,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     fontSize: 14,
+  },
+  fieldError: {
+    color: '#e53e3e',
+    fontSize: 13,
+    marginTop: -4,
   },
 });

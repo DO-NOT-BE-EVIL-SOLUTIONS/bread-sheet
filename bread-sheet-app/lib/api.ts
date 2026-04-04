@@ -2,10 +2,6 @@ import { supabase } from './supabase';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
-if (!BASE_URL) {
-  throw new Error('EXPO_PUBLIC_API_URL is required.');
-}
-
 async function authHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return {};

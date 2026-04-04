@@ -46,7 +46,7 @@ export const createRating = async (req: AuthRequest, res: Response, next: NextFu
 // Returns all ratings for a product, most recent first
 export const getRatingsForProduct = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { barcode } = req.params;
+    const barcode = req.params.barcode as string;
 
     const product = await prisma.product.findUnique({ where: { barcode } });
     if (!product) {

@@ -2,10 +2,11 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSession } from '@/hooks/use-session';
-import { supabase } from '@/lib/supabase';
+import { signOut } from '@/features/auth';
 import { useRouter } from 'expo-router';
 import {
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -47,18 +48,24 @@ export default function ProfileScreen() {
   const iconColor = Colors[colorScheme].icon;
   const router = useRouter();
 
-  async function signOut() {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase.auth.signOut();
-          if (error) Alert.alert('Error', error.message);
-        },
-      },
-    ]);
+  async function handleSignOut() {
+    const message = isAnonymous
+      ? 'You will lose all your guest data. This cannot be undone.'
+      : 'Are you sure you want to sign out?';
+
+    const doSignOut = async () => {
+      const { error } = await signOut();
+      if (error) Alert.alert('Error', error.message);
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) await doSignOut();
+    } else {
+      Alert.alert('Sign out', message, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Out', style: 'destructive', onPress: doSignOut },
+      ]);
+    }
   }
 
   return (
@@ -122,7 +129,7 @@ export default function ProfileScreen() {
         <SettingsRow
           icon="arrow.right.square"
           label="Sign Out"
-          onPress={signOut}
+          onPress={handleSignOut}
           tint={tint}
           destructive
         />

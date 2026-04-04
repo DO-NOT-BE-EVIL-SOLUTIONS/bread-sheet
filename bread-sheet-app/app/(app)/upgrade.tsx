@@ -2,7 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { supabase } from '@/lib/supabase';
+import { isValidEmail, upgradeAccount } from '@/features/auth';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -20,22 +20,47 @@ export default function UpgradeScreen() {
   const router = useRouter();
 
   const [email, setEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
 
   async function upgrade() {
+    if (!isValidEmail(email)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ email, password });
+    const { error } = await upgradeAccount(email, password);
     if (error) {
       Alert.alert('Upgrade failed', error.message);
-    } else {
-      Alert.alert(
-        'Check your email',
-        'We sent a verification link to ' + email + '. Verify it to complete your account.',
-        [{ text: 'OK', onPress: () => router.back() }],
-      );
+      setLoading(false);
+      return;
     }
+    setDone(true);
     setLoading(false);
+  }
+
+  if (done) {
+    return (
+      <ThemedView style={styles.successContainer}>
+        <ThemedText style={styles.icon}>📬</ThemedText>
+        <ThemedText type="title" style={styles.title}>Check your inbox</ThemedText>
+        <ThemedText style={styles.subtitle}>
+          We sent a verification link to{'\n'}
+          <ThemedText style={styles.emailText}>{email}</ThemedText>
+        </ThemedText>
+        <ThemedText style={styles.hint}>
+          Click the link to activate your account. Your guest data is safe.
+        </ThemedText>
+        <TouchableOpacity
+          style={[styles.primaryButton, { backgroundColor: tint }]}
+          onPress={() => router.back()}
+        >
+          <ThemedText style={styles.primaryButtonText}>Done</ThemedText>
+        </TouchableOpacity>
+      </ThemedView>
+    );
   }
 
   return (
@@ -55,11 +80,12 @@ export default function UpgradeScreen() {
           placeholder="Email"
           placeholderTextColor={Colors[colorScheme].icon}
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(v) => { setEmail(v); setEmailError(''); }}
           autoCapitalize="none"
           keyboardType="email-address"
           autoComplete="email"
         />
+        {emailError ? <ThemedText style={styles.fieldError}>{emailError}</ThemedText> : null}
         <TextInput
           style={[styles.input, { borderColor: Colors[colorScheme].icon, color: Colors[colorScheme].text }]}
           placeholder="Password"
@@ -133,7 +159,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
   },
+  fieldError: {
+    color: '#e53e3e',
+    fontSize: 13,
+    marginTop: -4,
+  },
   cancelText: {
     fontSize: 14,
+  },
+  successContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    gap: 16,
+  },
+  icon: {
+    fontSize: 56,
+    marginBottom: 8,
+  },
+  emailText: {
+    fontWeight: '600',
+  },
+  hint: {
+    textAlign: 'center',
+    opacity: 0.5,
+    fontSize: 14,
+    lineHeight: 20,
   },
 });

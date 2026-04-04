@@ -7,9 +7,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "db:deploy": "npx prisma migrate deploy && npx prisma generate",
+    "typecheck": "tsc --noEmit",
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "npm run prisma:generate && nodemon --legacy-watch --watch src --exec \"node --loader ts-node/esm --experimental-specifier-resolution=node src/server.ts\"",
+    "dev": "npm run prisma:generate && nodemon --legacy-watch --watch src --ext ts --exec \"tsx src/server.ts\"",
     "lint": "eslint \"src/**/*.ts\""
   },
   "keywords": [],
@@ -17,6 +18,7 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@tsconfig/node24": "^24.0.4",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.1.0",
     "@types/pg": "^8.16.0",
@@ -30,6 +32,7 @@
     "prettier": "^3.8.1",
     "prisma": "^7.6.0",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
@@ -37,6 +40,7 @@
     "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^7.6.0",
     "@supabase/supabase-js": "^2.98.0",
+    "cors": "^2.8.6",
     "express-rate-limit": "^8.2.1",
     "pg": "^8.17.2",
     "sharp": "^0.34.5",

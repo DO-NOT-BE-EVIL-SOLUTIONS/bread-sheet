@@ -6,7 +6,7 @@ import logger from '../logger.js';
 // GET /api/products/:barcode
 export const getProductByBarcode = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { barcode } = req.params;
+    const barcode = req.params.barcode as string;
 
     // 1. Check local cache first
     const cached = await prisma.product.findUnique({ where: { barcode } });

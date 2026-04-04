@@ -1,18 +1,21 @@
 import express from 'express';
+import cors from 'cors';
 import { errorHandler } from './middlewares/errorHandler.js';
-import { apiLimiter, authLimiter } from './middlewares/rateLimit.js';
+import { apiLimiter } from './middlewares/rateLimit.js';
 import userRoutes from './routes/userRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import ratingRoutes from './routes/ratingRoutes.js';
 import itemRoutes from './routes/itemRoutes.js';
 
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:8081').split(',');
+
 const app = express();
 
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json());
 
 // Rate limiting
 app.use('/api', apiLimiter);
-app.use('/api/auth', authLimiter);
 
 // Health check
 app.get('/', (_req, res) => {
