@@ -1,0 +1,78 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import request from 'supertest';
+
+const mockUserUpsert = vi.hoisted(() => vi.fn());
+const mockRatingFindMany = vi.hoisted(() => vi.fn());
+
+vi.mock('../db.js', () => ({
+  default: {
+    user: { upsert: mockUserUpsert },
+    rating: { findMany: mockRatingFindMany },
+  },
+}));
+
+vi.mock('../middlewares/authMiddleware.js', () => ({
+  requireAuth: (req: any, _res: any, next: any) => {
+    req.user = { id: 'user-1', email: 'test@test.com' };
+    next();
+  },
+}));
+
+vi.mock('../middlewares/rateLimit.js', () => ({
+  apiLimiter: (_req: any, _res: any, next: any) => next(),
+  userLimiter: (_req: any, _res: any, next: any) => next(),
+  syncLimiter: (_req: any, _res: any, next: any) => next(),
+}));
+
+import app from '../app.js';
+
+describe('POST /api/users/sync', () => {
+  beforeEach(() => {
+    mockUserUpsert.mockReset();
+  });
+
+  it('upserts the user and returns 200 with the user record', async () => {
+    const user = { id: 'user-1', email: 'test@test.com', username: null, avatar: null };
+    mockUserUpsert.mockResolvedValue(user);
+
+    const res = await request(app)
+      .post('/api/users/sync')
+      .set('Authorization', 'Bearer token')
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(user);
+    expect(mockUserUpsert).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      update: { email: 'test@test.com' },
+      create: { id: 'user-1', email: 'test@test.com' },
+    });
+  });
+});
+
+describe('GET /api/users/me/ratings', () => {
+  beforeEach(() => {
+    mockRatingFindMany.mockReset();
+  });
+
+  it('returns the authenticated user\'s ratings ordered by newest first', async () => {
+    const ratings = [
+      { id: 2, taste: 9, product: { name: 'Baguette' }, createdAt: '2026-04-05' },
+      { id: 1, taste: 7, product: { name: 'Rye Bread' }, createdAt: '2026-04-01' },
+    ];
+    mockRatingFindMany.mockResolvedValue(ratings);
+
+    const res = await request(app)
+      .get('/api/users/me/ratings')
+      .set('Authorization', 'Bearer token');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(ratings);
+    expect(mockRatingFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: 'user-1' },
+        orderBy: { createdAt: 'desc' },
+      })
+    );
+  });
+});

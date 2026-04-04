@@ -26,7 +26,7 @@
 * **Framework:** Express.js
 * **Database:** PostgreSQL
 * **ORM:** Prisma
-* **Authentication:** Firebase Auth or Supabase Auth
+* **Authentication:** Supabase Auth
 * **External Data:** Open Food Facts API
 * **Infrastructure:** Kubernetes (Amazon EKS), AWS Database, Terraform, ArgoCD
 * **Local Dev:** Docker Compose, LocalStack (for AWS service emulation)
@@ -57,19 +57,24 @@
     ```
 
 4. **Environment Setup**
-    * Create a `.env` file in the project root directory.
 
-        ```env
-        PORT=3000
-        NODE_ENV=development
-        DATABASE_URL="postgresql://admin:password@db:5432/breadsheet"
-        ```
-    * Create a second `.env` file in the `./server` directory.
+    This project requires a [Supabase](https://supabase.com) project for authentication. Create a free project at supabase.com, then find your **Project URL** and **anon/public key** under **Project Settings → API**. Additionally enable anonymous login for the project.
+
+    * Create a `./server/.env` file:
 
         ```env
         PORT=3000
         NODE_ENV=development
         DATABASE_URL="postgresql://admin:password@localhost:5432/breadsheet"
+        SUPABASE_URL=https://<your-project-ref>.supabase.co
+        SUPABASE_PUBLISHABLE_DEFAULT_KEY=<your-anon-key>
+        ```
+
+    * Create a `./bread-sheet-app/.env` file:
+
+        ```env
+        EXPO_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
+        EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=<your-anon-key>
         ```
 
 5. **Development with Docker**
@@ -78,17 +83,18 @@
 
     From the project root, run:
     ```bash
-    # This single command does it all:
-    # 1. Builds the server's Docker image (running `npm install` and `prisma generate`).
-    # 2. Starts the PostgreSQL database and LocalStack services.
-    # 3. Starts the server, which automatically runs database migrations on startup.
+    # Build and start localstack and db
+    docker compose up
+    # Initialize DB and run migrations
+    npm run db:deploy 
+    # Start the server.
     docker compose --profile app-dev up -d --build
     ```
     Your backend is now running. The server is available at `http://localhost:3000`.
 
 6. **Run the Server/App**
-    * **Server:** `npm run dev` (inside `/server`)
-    * **Client:** `npx expo start` (inside `/client`)
+    * **Server:** Inside `/server`: `npm run db:deploy` if database changed or needs initialization, afterwards `npm run dev`
+    * **Client:** `npx expo start` (inside `/bread-sheet-app`)
 
 ### Infrastructure (Terraform)
 

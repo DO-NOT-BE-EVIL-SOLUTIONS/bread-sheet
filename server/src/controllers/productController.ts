@@ -1,0 +1,39 @@
+import { Request, Response, NextFunction } from 'express';
+import prisma from '../db.js';
+import { fetchFromOpenFoodFacts } from '../services/productService.js';
+import logger from '../logger.js';
+
+// Barcodes are EAN-8, UPC-A (12 digits), or EAN-13 — all numeric.
+const BARCODE_RE = /^\d{8,13}$/;
+
+// GET /api/products/:barcode
+export const getProductByBarcode = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const barcode = req.params.barcode as string;
+
+    if (!BARCODE_RE.test(barcode)) {
+      return res.status(400).json({ message: 'Invalid barcode format' });
+    }
+
+    // 1. Check local cache first
+    const cached = await prisma.product.findUnique({ where: { barcode } });
+    if (cached) {
+      logger.info(`Product cache hit: ${barcode}`);
+      return res.json(cached);
+    }
+
+    // 2. Fetch from Open Food Facts
+    const data = await fetchFromOpenFoodFacts(barcode);
+    if (!data) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    // 3. Cache in DB and return
+    const product = await prisma.product.create({ data });
+    logger.info(`Product fetched and cached: ${barcode}`);
+    res.json(product);
+  } catch (error) {
+    logger.error(error);
+    next(error);
+  }
+};
