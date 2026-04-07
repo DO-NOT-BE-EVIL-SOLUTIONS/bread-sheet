@@ -9,6 +9,10 @@
 - [ ] `NODE_ENV=production`
 - [ ] `PORT` — set if different from 3000
 
+## Supabase
+
+- [ ]  Settings → Authentication → URL Configuration → Redirect URLs ▎Add breadsheet://** to the allowed list.
+
 ## Database
 
 - [ ] Run migrations before deploying: `npm run db:deploy`

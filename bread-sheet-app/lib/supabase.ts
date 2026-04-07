@@ -8,4 +8,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Supabase URL and Publishable Key are required.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    detectSessionInUrl: false, // handled manually via Linking on native
+    flowType: 'pkce',
+  },
+});

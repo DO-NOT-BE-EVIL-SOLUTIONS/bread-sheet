@@ -1,6 +1,7 @@
 import { api } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import * as Linking from 'expo-linking';
 import { type ReactNode, createContext, useContext, useEffect, useState } from 'react';
 
 const SessionContext = createContext<{
@@ -37,7 +38,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             }
         });
 
-        return () => subscription.unsubscribe();
+        // Exchange auth code from deep link (email verification callback)
+        const handleDeepLink = async ({ url }: { url: string }) => {
+            await supabase.auth.exchangeCodeForSession(url);
+        };
+        Linking.getInitialURL().then(url => { if (url) handleDeepLink({ url }); });
+        const linkingSub = Linking.addEventListener('url', handleDeepLink);
+
+        return () => {
+            subscription.unsubscribe();
+            linkingSub.remove();
+        };
     }, []);
 
     return (
