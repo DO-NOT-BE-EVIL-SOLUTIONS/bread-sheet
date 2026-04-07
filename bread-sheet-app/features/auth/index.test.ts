@@ -1,3 +1,10 @@
+import { isValidEmail, signIn, signUp, signOut, signInAsGuest, upgradeAccount } from './index';
+import { supabase } from '@/lib/supabase';
+
+jest.mock('expo-linking', () => ({
+  createURL: jest.fn(() => 'myapp://'),
+}));
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     auth: {
@@ -9,9 +16,6 @@ jest.mock('@/lib/supabase', () => ({
     },
   },
 }));
-
-import { isValidEmail, signIn, signUp, signOut, signInAsGuest, upgradeAccount } from './index';
-import { supabase } from '@/lib/supabase';
 
 const mockAuth = supabase.auth as jest.Mocked<typeof supabase.auth>;
 
