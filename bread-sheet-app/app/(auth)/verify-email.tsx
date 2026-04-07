@@ -8,6 +8,7 @@ import { StyleSheet, TouchableOpacity } from 'react-native';
 export default function VerifyEmailScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const bg = Colors[colorScheme].background;
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email: string }>();
 
@@ -27,7 +28,7 @@ export default function VerifyEmailScreen() {
         style={[styles.button, { backgroundColor: tint }]}
         onPress={() => router.replace('/(auth)/login')}
       >
-        <ThemedText style={styles.buttonText}>Back to Sign In</ThemedText>
+        <ThemedText style={[styles.buttonText, { color: bg }]}>Back to Sign In</ThemedText>
       </TouchableOpacity>
     </ThemedView>
   );
@@ -72,7 +73,6 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   buttonText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 16,
   },

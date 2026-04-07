@@ -17,6 +17,7 @@ import {
 export default function SignUpScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const bg = Colors[colorScheme].background;
   const router = useRouter();
 
   const [email, setEmail] = useState('');
@@ -71,7 +72,7 @@ export default function SignUpScreen() {
           onPress={signUpWithEmail}
           disabled={loading}
         >
-          <ThemedText style={styles.primaryButtonText}>
+          <ThemedText style={[styles.primaryButtonText, { color: bg }]}>
             {loading ? 'Creating account…' : 'Sign Up'}
           </ThemedText>
         </TouchableOpacity>
@@ -115,7 +116,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryButtonText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 16,
   },

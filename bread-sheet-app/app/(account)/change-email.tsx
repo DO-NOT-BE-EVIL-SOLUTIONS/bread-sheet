@@ -17,6 +17,7 @@ import {
 export default function ChangeEmailScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const bg = Colors[colorScheme].background;
   const router = useRouter();
 
   const [email, setEmail] = useState('');
@@ -44,7 +45,7 @@ export default function ChangeEmailScreen() {
     >
       <ThemedView style={styles.container}>
         <ThemedText style={styles.description}>
-          Enter your new email address. You'll need to verify it before the change takes effect.
+          Enter your new email address. You&lsquo;ll need to verify it before the change takes effect.
         </ThemedText>
 
         <TextInput
@@ -64,7 +65,7 @@ export default function ChangeEmailScreen() {
           onPress={changeEmail}
           disabled={loading || !email}
         >
-          <ThemedText style={styles.primaryButtonText}>
+          <ThemedText style={[styles.primaryButtonText, { color: bg }]}>
             {loading ? 'Sending…' : 'Send Verification'}
           </ThemedText>
         </TouchableOpacity>
@@ -99,7 +100,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryButtonText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 16,
   },

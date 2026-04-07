@@ -17,6 +17,7 @@ import {
 export default function ChangePasswordScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const bg = Colors[colorScheme].background;
   const router = useRouter();
 
   const [password, setPassword] = useState('');
@@ -77,7 +78,7 @@ export default function ChangePasswordScreen() {
           onPress={changePassword}
           disabled={!canSubmit || loading}
         >
-          <ThemedText style={styles.primaryButtonText}>
+          <ThemedText style={[styles.primaryButtonText, { color: bg }]}>
             {loading ? 'Updating…' : 'Update Password'}
           </ThemedText>
         </TouchableOpacity>
@@ -112,7 +113,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryButtonText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 16,
   },

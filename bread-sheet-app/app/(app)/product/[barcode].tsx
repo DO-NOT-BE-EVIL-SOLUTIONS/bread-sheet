@@ -119,7 +119,7 @@ export default function ProductScreen() {
           style={[styles.button, { backgroundColor: colors.tint }]}
           onPress={() => router.back()}
         >
-          <Text style={styles.buttonText}>Go Back</Text>
+          <Text style={[styles.buttonText, { color: colors.background }]}>Go Back</Text>
         </TouchableOpacity>
       </ThemedView>
     );
@@ -196,9 +196,9 @@ export default function ProductScreen() {
           disabled={submitting}
         >
           {submitting ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color={colors.background} size="small" />
           ) : (
-            <Text style={styles.buttonText}>Submit Rating</Text>
+            <Text style={[styles.buttonText, { color: colors.background }]}>Submit Rating</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -292,7 +292,6 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
     fontSize: 16,
     fontWeight: '700',
   },
