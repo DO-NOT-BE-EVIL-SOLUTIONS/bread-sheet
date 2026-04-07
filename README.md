@@ -41,6 +41,27 @@
 
 ### Local Installation
 
+## Development Environment
+
+This project consists of two parts with different recommended terminal environments on Windows:
+
+| Part | Recommendations                                                                       |
+|------|---------------------------------------------------------------------------------------|
+| `server/` — Node.js API + Docker | **WSL2**                                                                              |
+| `bread-sheet-app/` — Expo / React Native | **WSL2** (building docker container of backend) <br/><br/>**Native Windows** (PowerShell / CMD) |
+
+### Why native Windows for the Expo app?
+
+Expo needs to detect your local network interface to serve the dev bundle to physical devices or emulators. Running from WSL2 can cause network discovery issues (wrong IP, unreachable Metro server). Use a native Windows terminal here.
+
+### Why WSL2 for the server and building the Docker containers?
+
+Docker on Windows works best when build commands are run from a WSL2 terminal. It avoids bind-mount performance issues and path translation problems that occur with Windows paths.
+
+In IntelliJ / WebStorm you can open a WSL2 terminal directly:
+`View → Tool Windows → Terminal`, then select your WSL distro from the terminal dropdown.
+
+
 1. **Clone the repository**
 2. **Install React App Dependencies**
 
@@ -85,8 +106,12 @@
     ```bash
     # Build and start localstack and db
     docker compose up
+   # Switch into server directory
+    cd server
     # Initialize DB and run migrations
     npm run db:deploy 
+    # Switch back to project root
+    cd ..
     # Start the server.
     docker compose --profile app-dev up -d --build
     ```

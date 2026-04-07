@@ -66,9 +66,9 @@ Key Models:
 - "Submit" button.
 **State:** Use `zustand` for form state if complex.
 **Acceptance Criteria:**
-- [ ] User can view product details.
-- [ ] User can adjust rating values.
-- [ ] Submit button sends `POST` request to backend.
+- [x] User can view product details.
+- [x] User can adjust rating values.
+- [x] Submit button sends `POST` request to backend.
 User History
 
 ## Phase 4: Social & History
