@@ -1,3 +1,10 @@
+import { isValidEmail, signIn, signUp, signOut, signInAsGuest, upgradeAccount } from './index';
+import { supabase } from '@/lib/supabase';
+
+jest.mock('expo-linking', () => ({
+  createURL: jest.fn(() => 'myapp://'),
+}));
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     auth: {
@@ -9,9 +16,6 @@ jest.mock('@/lib/supabase', () => ({
     },
   },
 }));
-
-import { isValidEmail, signIn, signUp, signOut, signInAsGuest, upgradeAccount } from './index';
-import { supabase } from '@/lib/supabase';
 
 const mockAuth = supabase.auth as jest.Mocked<typeof supabase.auth>;
 
@@ -50,10 +54,14 @@ describe('signIn', () => {
 });
 
 describe('signUp', () => {
-  it('delegates to supabase.auth.signUp with the correct credentials', async () => {
+  it('delegates to supabase.auth.signUp with credentials and emailRedirectTo', async () => {
     (mockAuth.signUp as jest.Mock).mockResolvedValue({ data: {}, error: null });
     await signUp('a@b.com', 'secret');
-    expect(mockAuth.signUp).toHaveBeenCalledWith({ email: 'a@b.com', password: 'secret' });
+    expect(mockAuth.signUp).toHaveBeenCalledWith({
+      email: 'a@b.com',
+      password: 'secret',
+      options: { emailRedirectTo: 'myapp://' },
+    });
   });
 });
 
@@ -66,10 +74,13 @@ describe('signInAsGuest', () => {
 });
 
 describe('upgradeAccount', () => {
-  it('delegates to supabase.auth.updateUser with email and password', async () => {
+  it('delegates to supabase.auth.updateUser with credentials and emailRedirectTo', async () => {
     (mockAuth.updateUser as jest.Mock).mockResolvedValue({ data: {}, error: null });
     await upgradeAccount('a@b.com', 'newpass');
-    expect(mockAuth.updateUser).toHaveBeenCalledWith({ email: 'a@b.com', password: 'newpass' });
+    expect(mockAuth.updateUser).toHaveBeenCalledWith(
+      { email: 'a@b.com', password: 'newpass' },
+      { emailRedirectTo: 'myapp://' },
+    );
   });
 });
 

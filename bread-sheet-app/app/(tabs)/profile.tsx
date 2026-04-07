@@ -101,6 +101,13 @@ export default function ProfileScreen() {
               onPress={() => router.push('/(account)/upgrade')}
               tint={tint}
             />
+            <View style={[styles.separator, { borderBottomColor: Colors[colorScheme].icon + '30' }]} />
+            <SettingsRow
+              icon="arrow.right.square"
+              label="Sign In"
+              onPress={() => router.push('/(auth)/login')}
+              tint={tint}
+            />
           </View>
           <Text style={[styles.sectionFooter, { color: iconColor }]}>
             Link an email and password to keep your ratings and groups across devices.
