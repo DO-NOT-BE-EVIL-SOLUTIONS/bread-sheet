@@ -3,7 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { isValidEmail, signIn, signInAsGuest } from '@/features/auth';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
@@ -18,6 +18,7 @@ export default function LoginScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
   const bg = Colors[colorScheme].background;
+  const router = useRouter();
 
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -39,7 +40,11 @@ export default function LoginScreen() {
   async function handleGuestSignIn() {
     setLoadingGuest(true);
     const { error } = await signInAsGuest();
-    if (error) Alert.alert('Guest sign-in failed', error.message);
+    if (error) {
+      Alert.alert('Guest sign-in failed', error.message);
+    } else {
+      router.replace('/(tabs)');
+    }
     setLoadingGuest(false);
   }
 
