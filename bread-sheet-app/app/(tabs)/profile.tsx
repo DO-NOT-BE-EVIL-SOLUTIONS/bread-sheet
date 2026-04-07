@@ -23,13 +23,17 @@ type RowProps = {
 };
 
 function SettingsRow({ icon, label, onPress, tint, destructive }: RowProps) {
-  const color = destructive ? '#FF3B30' : tint;
+  const colorScheme = useColorScheme() ?? 'light';
+  const bg = Colors[colorScheme].background;
+  const textColor = Colors[colorScheme].text;
+  const iconBg = destructive ? '#FF3B30' : tint;
+  const iconFg = destructive ? '#fff' : bg;
   return (
     <TouchableOpacity style={styles.row} onPress={onPress}>
-      <View style={[styles.rowIcon, { backgroundColor: color }]}>
-        <IconSymbol name={icon} size={18} color="#fff" />
+      <View style={[styles.rowIcon, { backgroundColor: iconBg }]}>
+        <IconSymbol name={icon} size={18} color={iconFg} />
       </View>
-      <Text style={[styles.rowLabel, destructive && styles.destructiveLabel]}>{label}</Text>
+      <Text style={[styles.rowLabel, { color: textColor }, destructive && styles.destructiveLabel]}>{label}</Text>
       {!destructive && <IconSymbol name="chevron.right" size={16} color="#C7C7CC" />}
     </TouchableOpacity>
   );
@@ -73,7 +77,7 @@ export default function ProfileScreen() {
       {/* Account card */}
       <View style={[styles.accountCard, { backgroundColor: bg }]}>
         <View style={[styles.avatar, { backgroundColor: tint }]}>
-          <Text style={styles.avatarText}>
+          <Text style={[styles.avatarText, { color: bg }]}>
             {isAnonymous ? '?' : (session?.user.email?.[0] ?? '?').toUpperCase()}
           </Text>
         </View>
@@ -100,7 +104,7 @@ export default function ProfileScreen() {
           </View>
           <Text style={[styles.sectionFooter, { color: iconColor }]}>
             Link an email and password to keep your ratings and groups across devices.
-            Your existing data won't be lost.
+            Your existing data won&lsquo;t be lost.
           </Text>
         </>
       ) : (
@@ -113,7 +117,7 @@ export default function ProfileScreen() {
               onPress={() => router.push('/(account)/change-email')}
               tint={tint}
             />
-            <View style={[styles.separator, { backgroundColor: Colors[colorScheme].icon + '30' }]} />
+            <View style={[styles.separator, { borderBottomColor: Colors[colorScheme].icon + '30' }]} />
             <SettingsRow
               icon="lock.fill"
               label="Change Password"
@@ -160,7 +164,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarText: {
-    color: '#fff',
     fontSize: 22,
     fontWeight: '600',
   },
@@ -212,13 +215,12 @@ const styles = StyleSheet.create({
   rowLabel: {
     flex: 1,
     fontSize: 16,
-    color: '#000',
   },
   destructiveLabel: {
     color: '#FF3B30',
   },
   separator: {
-    height: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     marginLeft: 56,
   },
 });

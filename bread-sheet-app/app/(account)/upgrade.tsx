@@ -17,6 +17,7 @@ import {
 export default function UpgradeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const bg = Colors[colorScheme].background;
   const router = useRouter();
 
   const [email, setEmail] = useState('');
@@ -48,7 +49,7 @@ export default function UpgradeScreen() {
         <ThemedText type="title" style={styles.title}>Save your account</ThemedText>
         <ThemedText style={styles.subtitle}>
           Add an email and password to keep your ratings and groups across devices.
-          Your guest data won't be lost.
+          Your guest data won&lsquo;t be lost.
         </ThemedText>
 
         <TextInput
@@ -77,7 +78,7 @@ export default function UpgradeScreen() {
           onPress={upgrade}
           disabled={loading}
         >
-          <ThemedText style={styles.primaryButtonText}>
+          <ThemedText style={[styles.primaryButtonText, { color: bg }]}>
             {loading ? 'Saving…' : 'Save Account'}
           </ThemedText>
         </TouchableOpacity>
@@ -124,7 +125,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryButtonText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 16,
   },

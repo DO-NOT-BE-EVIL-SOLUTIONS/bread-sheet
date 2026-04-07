@@ -17,6 +17,7 @@ import {
 export default function LoginScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
+  const bg = Colors[colorScheme].background;
 
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -77,7 +78,7 @@ export default function LoginScreen() {
           onPress={signInWithEmail}
           disabled={loading}
         >
-          <ThemedText style={styles.primaryButtonText}>
+          <ThemedText style={[styles.primaryButtonText, { color: bg }]}>
             {loading ? 'Signing in…' : 'Sign In'}
           </ThemedText>
         </TouchableOpacity>
@@ -93,7 +94,7 @@ export default function LoginScreen() {
         </TouchableOpacity>
 
         <Link href="/(auth)/signup" style={[styles.link, { color: tint }]}>
-          Don't have an account? Sign up
+          Don&lsquo;t have an account? Sign up
         </Link>
       </ThemedView>
     </KeyboardAvoidingView>
@@ -131,7 +132,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryButtonText: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 16,
   },
