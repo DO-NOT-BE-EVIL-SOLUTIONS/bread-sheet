@@ -1,5 +1,5 @@
 import React from 'react';
-import { renderHook, waitFor } from '@testing-library/react-native';
+import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { SessionProvider, useSession } from './use-session';
 import { supabase } from '@/lib/supabase';
@@ -84,7 +84,7 @@ describe('useSession', () => {
     expect(result.current.session).toBeNull();
 
     const newSession = { access_token: 'tok', user: { id: 'u1', is_anonymous: false } };
-    authCallback('SIGNED_IN', newSession);
+    act(() => authCallback('SIGNED_IN', newSession));
 
     await waitFor(() => expect(result.current.session).toEqual(newSession));
     expect(result.current.isAnonymous).toBe(false);
