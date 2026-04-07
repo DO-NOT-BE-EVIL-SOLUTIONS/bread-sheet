@@ -54,10 +54,14 @@ describe('signIn', () => {
 });
 
 describe('signUp', () => {
-  it('delegates to supabase.auth.signUp with the correct credentials', async () => {
+  it('delegates to supabase.auth.signUp with credentials and emailRedirectTo', async () => {
     (mockAuth.signUp as jest.Mock).mockResolvedValue({ data: {}, error: null });
     await signUp('a@b.com', 'secret');
-    expect(mockAuth.signUp).toHaveBeenCalledWith({ email: 'a@b.com', password: 'secret' });
+    expect(mockAuth.signUp).toHaveBeenCalledWith({
+      email: 'a@b.com',
+      password: 'secret',
+      options: { emailRedirectTo: 'myapp://' },
+    });
   });
 });
 
@@ -70,10 +74,13 @@ describe('signInAsGuest', () => {
 });
 
 describe('upgradeAccount', () => {
-  it('delegates to supabase.auth.updateUser with email and password', async () => {
+  it('delegates to supabase.auth.updateUser with credentials and emailRedirectTo', async () => {
     (mockAuth.updateUser as jest.Mock).mockResolvedValue({ data: {}, error: null });
     await upgradeAccount('a@b.com', 'newpass');
-    expect(mockAuth.updateUser).toHaveBeenCalledWith({ email: 'a@b.com', password: 'newpass' });
+    expect(mockAuth.updateUser).toHaveBeenCalledWith(
+      { email: 'a@b.com', password: 'newpass' },
+      { emailRedirectTo: 'myapp://' },
+    );
   });
 });
 

@@ -1,6 +1,9 @@
 import React from 'react';
 import { renderHook, waitFor } from '@testing-library/react-native';
 
+import { SessionProvider, useSession } from './use-session';
+import { supabase } from '@/lib/supabase';
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     auth: {
@@ -13,9 +16,6 @@ jest.mock('@/lib/supabase', () => ({
 jest.mock('@/lib/api', () => ({
   api: { post: jest.fn().mockResolvedValue({}) },
 }));
-
-import { SessionProvider, useSession } from './use-session';
-import { supabase } from '@/lib/supabase';
 
 const mockGetSession = supabase.auth.getSession as jest.Mock;
 const mockOnAuthStateChange = supabase.auth.onAuthStateChange as jest.Mock;
@@ -68,6 +68,25 @@ describe('useSession', () => {
     mockGetSession.mockResolvedValue({ data: { session } });
     const { result } = renderHook(() => useSession(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isAnonymous).toBe(false);
+  });
+
+  it('updates session when onAuthStateChange fires with a new session', async () => {
+    let authCallback: (event: string, session: any) => void = () => {};
+    mockOnAuthStateChange.mockImplementation((cb: any) => {
+      authCallback = cb;
+      return { data: { subscription: { unsubscribe: jest.fn() } } };
+    });
+    mockGetSession.mockResolvedValue({ data: { session: null } });
+
+    const { result } = renderHook(() => useSession(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.session).toBeNull();
+
+    const newSession = { access_token: 'tok', user: { id: 'u1', is_anonymous: false } };
+    authCallback('SIGNED_IN', newSession);
+
+    await waitFor(() => expect(result.current.session).toEqual(newSession));
     expect(result.current.isAnonymous).toBe(false);
   });
 
