@@ -1,16 +1,19 @@
 import { useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet } from 'react-native';
+
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
 
 // Stub screen — will be fully implemented in TICKET-005
 export default function ProductScreen() {
   const { barcode } = useLocalSearchParams<{ barcode: string }>();
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>Barcode</Text>
-      <Text style={styles.barcode}>{barcode}</Text>
-      <Text style={styles.hint}>Product details coming soon.</Text>
-    </View>
+    <ThemedView style={styles.container}>
+      <ThemedText style={styles.label}>Barcode</ThemedText>
+      <ThemedText style={styles.barcode}>{barcode}</ThemedText>
+      <ThemedText style={styles.hint}>Product details coming soon.</ThemedText>
+    </ThemedView>
   );
 }
 
