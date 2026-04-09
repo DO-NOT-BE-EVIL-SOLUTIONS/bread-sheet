@@ -16,6 +16,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { api } from '@/lib/api';
+import { useRecentProducts } from '@/hooks/use-recent-products';
 
 interface Product {
   id: string;
@@ -52,6 +53,8 @@ export default function ProductScreen() {
   const colors = Colors[colorScheme];
   const router = useRouter();
 
+  const { addRecentProduct } = useRecentProducts();
+
   const [product, setProduct] = useState<Product | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,7 +70,12 @@ export default function ProductScreen() {
   useEffect(() => {
     let cancelled = false;
     api.get<Product>(`/api/products/${barcode}`)
-      .then((data) => { if (!cancelled) setProduct(data); })
+      .then((data) => {
+        if (!cancelled) {
+          setProduct(data);
+          addRecentProduct({ barcode: data.barcode, name: data.name, brand: data.brand, image: data.image });
+        }
+      })
       .catch((err: Error) => { if (!cancelled) setLoadError(err.message ?? 'Failed to load product'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };

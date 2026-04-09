@@ -26,17 +26,26 @@ The mobile app is the primary entry point for users.
   ``` text
   bread-sheet-app/
   ├── app/
-  │   ├── (app)/       # Authenticated routes
-  │   ├── (tabs)/      # Main tab navigator layout and screens
-  │   ├── _layout.tsx  # Root layout
-  │   └── modal.tsx    # Example of a modal screen
-  ├── components/      # Shared, reusable UI components
-  ├── constants/       # Theme, colors, and other static values
-  ├── features/        # Business-logic-specific modules (auth, food, groups)
-  └── hooks/           # Reusable React hooks
+  │   ├── (app)/            # Authenticated stack routes
+  │   │   └── product/[barcode].tsx  # Product detail + rating screen
+  │   ├── (tabs)/           # Main tab navigator layout and screens
+  │   │   ├── index.tsx     # Home tab — ratings history + recently opened
+  │   │   ├── scan.tsx      # Barcode scanner tab
+  │   │   └── profile.tsx   # User profile & settings tab
+  │   ├── _layout.tsx       # Root layout (SessionProvider + RecentProductsProvider)
+  │   └── modal.tsx
+  ├── components/           # Shared, reusable UI components
+  ├── constants/            # Theme, colors, and other static values
+  ├── features/             # Business-logic-specific modules (auth, food, groups)
+  ├── hooks/
+  │   ├── use-session.tsx          # Auth session context + sync
+  │   └── use-recent-products.tsx  # In-memory recently viewed product context
+  └── lib/
+      ├── api.ts       # Typed HTTP client with Supabase auth headers
+      └── supabase.ts  # Supabase client initialisation
   ```
 
-- **State Management:** Zustand is used for lightweight, simple global state management.
+- **State Management:** React Context is used for lightweight global state (session, recently viewed products). Hooks in `hooks/` encapsulate the context consumers (`use-session`, `use-recent-products`).
 - **UI:** The UI is built with standard React Native components, potentially extended with a library like React Native Paper or Tamagui as hinted in the `README.md`.
 - **Navigation:** **React Navigation** handles all in-app navigation, including the main tab bar and nested stacks.
 
