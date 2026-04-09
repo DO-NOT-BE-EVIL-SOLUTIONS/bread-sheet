@@ -38,11 +38,43 @@ describe('POST /api/ratings', () => {
     mockRatingCreate.mockReset();
   });
 
-  it('returns 400 when required fields are missing', async () => {
+  it('returns 400 when barcode is missing', async () => {
     const res = await request(app)
       .post('/api/ratings')
       .set('Authorization', 'Bearer token')
-      .send({ barcode: '1234567890123', taste: 8 }); // missing texture and value
+      .send({ taste: 7.5 });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when taste is missing', async () => {
+    const res = await request(app)
+      .post('/api/ratings')
+      .set('Authorization', 'Bearer token')
+      .send({ barcode: '1234567890123' });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when taste is out of range (above 10)', async () => {
+    const res = await request(app)
+      .post('/api/ratings')
+      .set('Authorization', 'Bearer token')
+      .send({ barcode: '1234567890123', taste: 10.5 });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when taste is out of range (below 0)', async () => {
+    const res = await request(app)
+      .post('/api/ratings')
+      .set('Authorization', 'Bearer token')
+      .send({ barcode: '1234567890123', taste: -0.5 });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when taste is not on a 0.5 boundary', async () => {
+    const res = await request(app)
+      .post('/api/ratings')
+      .set('Authorization', 'Bearer token')
+      .send({ barcode: '1234567890123', taste: 7.3 });
     expect(res.status).toBe(400);
   });
 
@@ -51,49 +83,66 @@ describe('POST /api/ratings', () => {
     const res = await request(app)
       .post('/api/ratings')
       .set('Authorization', 'Bearer token')
-      .send({ barcode: '1234567890123', taste: 8, texture: 7, value: 6 });
+      .send({ barcode: '1234567890123', taste: 7.5 });
     expect(res.status).toBe(404);
   });
 
   it('creates a rating and returns 201 with the rating body', async () => {
-    const rating = { id: 1, userId: 'user-1', productId: 10, taste: 8, texture: 7, value: 6, score: 7, comment: null, product: PRODUCT };
+    const rating = { id: 1, userId: 'user-1', productId: 10, taste: 7.5, score: 7.5, comment: null, product: PRODUCT };
     mockProductFindUnique.mockResolvedValue(PRODUCT);
     mockRatingCreate.mockResolvedValue(rating);
 
     const res = await request(app)
       .post('/api/ratings')
       .set('Authorization', 'Bearer token')
-      .send({ barcode: '1234567890123', taste: 8, texture: 7, value: 6 });
+      .send({ barcode: '1234567890123', taste: 7.5 });
 
     expect(res.status).toBe(201);
     expect(res.body.id).toBe(1);
   });
 
-  it('computes score as Math.round((taste + texture + value) / 3)', async () => {
-    // (10 + 10 + 1) / 3 = 7
+  it('stores score equal to taste', async () => {
     mockProductFindUnique.mockResolvedValue(PRODUCT);
-    mockRatingCreate.mockResolvedValue({ id: 2, score: 7, product: PRODUCT });
+    mockRatingCreate.mockResolvedValue({ id: 2, score: 8.5, product: PRODUCT });
 
     await request(app)
       .post('/api/ratings')
       .set('Authorization', 'Bearer token')
-      .send({ barcode: '1234567890123', taste: 10, texture: 10, value: 1 });
+      .send({ barcode: '1234567890123', taste: 8.5 });
 
     expect(mockRatingCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ score: 7 }),
+        data: expect.objectContaining({ taste: 8.5, score: 8.5 }),
       })
     );
   });
 
+  it('accepts taste at the boundaries (0 and 10)', async () => {
+    mockProductFindUnique.mockResolvedValue(PRODUCT);
+    mockRatingCreate.mockResolvedValue({ id: 3, taste: 0, score: 0, product: PRODUCT });
+
+    const resMin = await request(app)
+      .post('/api/ratings')
+      .set('Authorization', 'Bearer token')
+      .send({ barcode: '1234567890123', taste: 0 });
+    expect(resMin.status).toBe(201);
+
+    mockRatingCreate.mockResolvedValue({ id: 4, taste: 10, score: 10, product: PRODUCT });
+    const resMax = await request(app)
+      .post('/api/ratings')
+      .set('Authorization', 'Bearer token')
+      .send({ barcode: '1234567890123', taste: 10 });
+    expect(resMax.status).toBe(201);
+  });
+
   it('includes an optional comment when provided', async () => {
     mockProductFindUnique.mockResolvedValue(PRODUCT);
-    mockRatingCreate.mockResolvedValue({ id: 3, comment: 'Tasty!', product: PRODUCT });
+    mockRatingCreate.mockResolvedValue({ id: 5, comment: 'Tasty!', product: PRODUCT });
 
     await request(app)
       .post('/api/ratings')
       .set('Authorization', 'Bearer token')
-      .send({ barcode: '1234567890123', taste: 9, texture: 9, value: 9, comment: 'Tasty!' });
+      .send({ barcode: '1234567890123', taste: 9, comment: 'Tasty!' });
 
     expect(mockRatingCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -118,7 +167,7 @@ describe('GET /api/ratings/product/:barcode', () => {
   });
 
   it('returns the list of ratings for a known product', async () => {
-    const ratings = [{ id: 1, taste: 8, user: { id: 'user-1', username: 'Jano', avatar: null } }];
+    const ratings = [{ id: 1, taste: 8.5, score: 8.5, user: { id: 'user-1', username: 'Jano', avatar: null } }];
     mockProductFindUnique.mockResolvedValue(PRODUCT);
     mockRatingFindMany.mockResolvedValue(ratings);
 

@@ -29,10 +29,8 @@ interface RatedProduct {
 
 interface RatingEntry {
   id: string;
-  score: number;
-  taste: number | null;
-  texture: number | null;
-  value: number | null;
+  score: number;   // 0–10, mirrors taste
+  taste: number;   // 0–10 in 0.5 increments
   comment: string | null;
   createdAt: string;
   product: RatedProduct;
@@ -40,17 +38,32 @@ interface RatingEntry {
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
-function Stars({ score, size = 14 }: { score: number; size?: number }) {
+// Displays a compact taste score badge, e.g. "7.5"
+function ScoreBadge({ score }: { score: number }) {
+  const label = score % 1 === 0 ? score.toFixed(1) : score.toString();
+  // amber below 5, green above 7, yellow in-between
+  const color = score >= 7 ? '#4caf50' : score >= 5 ? '#f0c040' : '#f5a623';
   return (
-    <View style={{ flexDirection: 'row', gap: 2 }}>
-      {[1, 2, 3, 4, 5].map((s) => (
-        <Text key={s} style={{ fontSize: size, color: s <= score ? '#f5a623' : '#ccc' }}>
-          {s <= score ? '★' : '☆'}
-        </Text>
-      ))}
+    <View style={[badgeStyles.pill, { borderColor: color }]}>
+      <Text style={[badgeStyles.text, { color }]}>{label}</Text>
+      <Text style={badgeStyles.outOf}>/10</Text>
     </View>
   );
 }
+
+const badgeStyles = StyleSheet.create({
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    gap: 1,
+  },
+  text: { fontSize: 14, fontWeight: '700', lineHeight: 18 },
+  outOf: { fontSize: 10, color: '#aaa', marginBottom: 1 },
+});
 
 function ProductThumb({ image }: { image: string | null }) {
   if (image) {
@@ -133,7 +146,7 @@ function RatingCard({
           </Text>
         ) : null}
         <View style={cardStyles.scoreRow}>
-          <Stars score={entry.score} size={13} />
+          <ScoreBadge score={entry.score} />
           <Text style={[cardStyles.time, { color: iconColor }]}>{relativeTime(entry.createdAt)}</Text>
         </View>
         {entry.comment ? (
