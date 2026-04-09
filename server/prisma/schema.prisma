@@ -38,10 +38,8 @@ model Product {
 
 model Rating {
   id        String   @id @default(uuid())
-  score     Int      // Overall score or calculated average
-  taste     Int?
-  texture   Int?
-  value     Int?
+  score     Float    // Taste score (0–10, 0.5 steps)
+  taste     Float    // Taste rating on a 0–10 scale with 0.5 increments
   comment   String?
   createdAt DateTime @default(now())
 

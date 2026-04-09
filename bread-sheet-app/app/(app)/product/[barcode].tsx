@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Image,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,25 +29,272 @@ interface Product {
   description: string | null;
 }
 
-function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+// ─── Taste Score Colour ───────────────────────────────────────────────────────
+// Interpolates amber → green as score rises 0 → 10
+function scoreColor(score: number): string {
+  const t = score / 10; // 0..1
+  if (t < 0.5) {
+    // amber (#f5a623) → yellow (#f0d060)
+    const r = Math.round(245 + (240 - 245) * (t / 0.5));
+    const g = Math.round(166 + (208 - 166) * (t / 0.5));
+    const b = Math.round(35 + (96 - 35) * (t / 0.5));
+    return `rgb(${r},${g},${b})`;
+  } else {
+    // yellow → green (#4caf50)
+    const u = (t - 0.5) / 0.5;
+    const r = Math.round(240 + (76 - 240) * u);
+    const g = Math.round(208 + (175 - 208) * u);
+    const b = Math.round(96 + (80 - 96) * u);
+    return `rgb(${r},${g},${b})`;
+  }
+}
+
+// ─── TasteSlider ──────────────────────────────────────────────────────────────
+//
+// UX design:
+//   • Large score badge front and centre
+//   • Horizontal draggable track (snaps to 0.5)
+//   • –0.5 / +0.5 stepper buttons for fine control
+//   • Filled track colour transitions amber → green
+//   • Tick marks at whole numbers
+//
+function TasteSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const TRACK_WIDTH = 280;
+  const MIN = 0;
+  const MAX = 10;
+  const STEP = 0.5;
+  const STEPS = (MAX - MIN) / STEP; // 20 intervals
+
+  const trackRef = useRef<View>(null);
+  const trackX = useRef(0);
+  const startX = useRef(0);
+  const startVal = useRef(value);
+
+  const thumbAnim = useRef(new Animated.Value((value / MAX) * TRACK_WIDTH)).current;
+
+  // Keep thumb position in sync when value changes via stepper
+  useEffect(() => {
+    Animated.spring(thumbAnim, {
+      toValue: (value / MAX) * TRACK_WIDTH,
+      useNativeDriver: false,
+      speed: 30,
+      bounciness: 4,
+    }).start();
+  }, [value]);
+
+  const snap = (raw: number) => {
+    const clamped = Math.max(MIN, Math.min(MAX, raw));
+    return Math.round(clamped / STEP) * STEP;
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        startX.current = evt.nativeEvent.pageX;
+        startVal.current = value;
+      },
+      onPanResponderMove: (evt) => {
+        const dx = evt.nativeEvent.pageX - startX.current;
+        const delta = (dx / TRACK_WIDTH) * MAX;
+        const snapped = snap(startVal.current + delta);
+        onChange(snapped);
+      },
+    })
+  ).current;
+
+  const step = (dir: 1 | -1) => {
+    onChange(snap(value + dir * STEP));
+  };
+
+  const color = scoreColor(value);
+  const fillWidth = thumbAnim.interpolate({
+    inputRange: [0, TRACK_WIDTH],
+    outputRange: [0, TRACK_WIDTH],
+    extrapolate: 'clamp',
+  });
+
   return (
-    <View style={starStyles.row}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <TouchableOpacity key={star} onPress={() => onChange(star)} hitSlop={8}>
-          <Text style={[starStyles.star, star <= value && starStyles.filled]}>
-            {star <= value ? '★' : '☆'}
-          </Text>
+    <View style={sliderStyles.container}>
+      {/* Score badge */}
+      <View style={[sliderStyles.badge, { borderColor: color }]}>
+        <Text style={[sliderStyles.scoreText, { color }]}>
+          {value % 1 === 0 ? value.toFixed(1) : value.toString()}
+        </Text>
+        <Text style={sliderStyles.outOfText}>/10</Text>
+      </View>
+
+      {/* Stepper row */}
+      <View style={sliderStyles.stepperRow}>
+        <TouchableOpacity
+          style={[sliderStyles.stepBtn, value <= MIN && sliderStyles.stepBtnDisabled]}
+          onPress={() => step(-1)}
+          disabled={value <= MIN}
+          hitSlop={12}
+        >
+          <Text style={[sliderStyles.stepBtnText, value <= MIN && sliderStyles.stepBtnTextDisabled]}>−</Text>
         </TouchableOpacity>
-      ))}
+
+        {/* Draggable track */}
+        <View
+          ref={trackRef}
+          style={sliderStyles.track}
+          {...panResponder.panHandlers}
+        >
+          {/* Fill */}
+          <Animated.View
+            style={[sliderStyles.trackFill, { width: fillWidth, backgroundColor: color }]}
+            pointerEvents="none"
+          />
+          {/* Tick marks at whole numbers */}
+          {Array.from({ length: 11 }, (_, i) => i).map((n) => (
+            <View
+              key={n}
+              style={[
+                sliderStyles.tick,
+                { left: (n / MAX) * TRACK_WIDTH - 1 },
+                n <= value && sliderStyles.tickFilled,
+              ]}
+            />
+          ))}
+          {/* Thumb */}
+          <Animated.View
+            style={[
+              sliderStyles.thumb,
+              { left: thumbAnim, backgroundColor: color },
+            ]}
+            pointerEvents="none"
+          />
+        </View>
+
+        <TouchableOpacity
+          style={[sliderStyles.stepBtn, value >= MAX && sliderStyles.stepBtnDisabled]}
+          onPress={() => step(1)}
+          disabled={value >= MAX}
+          hitSlop={12}
+        >
+          <Text style={[sliderStyles.stepBtnText, value >= MAX && sliderStyles.stepBtnTextDisabled]}>+</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Scale labels */}
+      <View style={sliderStyles.labelsRow}>
+        <Text style={sliderStyles.labelText}>0</Text>
+        <Text style={sliderStyles.labelText}>5</Text>
+        <Text style={sliderStyles.labelText}>10</Text>
+      </View>
     </View>
   );
 }
 
-const starStyles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 6 },
-  star: { fontSize: 30, color: '#ccc' },
-  filled: { color: '#f5a623' },
+const THUMB_SIZE = 24;
+const TRACK_HEIGHT = 8;
+
+const sliderStyles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    gap: 20,
+    paddingVertical: 8,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderWidth: 3,
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  scoreText: {
+    fontSize: 52,
+    fontWeight: '800',
+    lineHeight: 56,
+    letterSpacing: -1,
+  },
+  outOfText: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#999',
+    marginBottom: 8,
+  },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stepBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0ece4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBtnDisabled: {
+    opacity: 0.35,
+  },
+  stepBtnText: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#555',
+    lineHeight: 28,
+  },
+  stepBtnTextDisabled: {
+    color: '#aaa',
+  },
+  track: {
+    width: 280,
+    height: TRACK_HEIGHT,
+    borderRadius: TRACK_HEIGHT / 2,
+    backgroundColor: '#e0ddd8',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  trackFill: {
+    position: 'absolute',
+    height: TRACK_HEIGHT,
+    borderRadius: TRACK_HEIGHT / 2,
+    left: 0,
+  },
+  tick: {
+    position: 'absolute',
+    width: 2,
+    height: TRACK_HEIGHT + 4,
+    borderRadius: 1,
+    backgroundColor: '#c8c4bc',
+    top: -2,
+  },
+  tickFilled: {
+    backgroundColor: 'rgba(255,255,255,0.6)',
+  },
+  thumb: {
+    position: 'absolute',
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: THUMB_SIZE / 2,
+    marginLeft: -(THUMB_SIZE / 2),
+    top: -(THUMB_SIZE - TRACK_HEIGHT) / 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  labelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: 280,
+    marginTop: -8,
+  },
+  labelText: {
+    fontSize: 12,
+    color: '#aaa',
+    fontWeight: '500',
+  },
 });
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ProductScreen() {
   const { barcode } = useLocalSearchParams<{ barcode: string }>();
@@ -59,9 +308,7 @@ export default function ProductScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [taste, setTaste] = useState(3);
-  const [texture, setTexture] = useState(3);
-  const [value, setValue] = useState(3);
+  const [taste, setTaste] = useState(5);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -89,8 +336,6 @@ export default function ProductScreen() {
       await api.post('/api/ratings', {
         barcode: product.barcode,
         taste,
-        texture,
-        value,
         comment: comment.trim() || undefined,
       });
       setSubmitted(true);
@@ -99,7 +344,7 @@ export default function ProductScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [product, taste, texture, value, comment, submitting]);
+  }, [product, taste, comment, submitting]);
 
   if (loading) {
     return (
@@ -120,9 +365,11 @@ export default function ProductScreen() {
   if (submitted) {
     return (
       <ThemedView style={styles.center}>
-        <Text style={[styles.successIcon]}>🎉</Text>
+        <Text style={styles.successIcon}>🎉</Text>
         <ThemedText type="title" style={styles.successTitle}>Rating Submitted!</ThemedText>
-        <ThemedText style={styles.successSubtitle}>Thanks for your review.</ThemedText>
+        <ThemedText style={styles.successSubtitle}>
+          You gave it a {taste % 1 === 0 ? taste.toFixed(1) : taste}/10 for taste.
+        </ThemedText>
         <TouchableOpacity
           style={[styles.button, { backgroundColor: colors.tint }]}
           onPress={() => router.back()}
@@ -160,20 +407,10 @@ export default function ProductScreen() {
       <View style={[styles.divider, { backgroundColor: colors.icon + '33' }]} />
 
       <View style={styles.ratingSection}>
-        <ThemedText type="subtitle" style={styles.sectionTitle}>Rate This Product</ThemedText>
+        <ThemedText type="subtitle" style={styles.sectionTitle}>How does it taste?</ThemedText>
+        <ThemedText style={styles.sectionHint}>Drag the slider or use − / + to set your score.</ThemedText>
 
-        <View style={styles.ratingRow}>
-          <ThemedText style={styles.ratingLabel}>Taste</ThemedText>
-          <StarPicker value={taste} onChange={setTaste} />
-        </View>
-        <View style={styles.ratingRow}>
-          <ThemedText style={styles.ratingLabel}>Texture</ThemedText>
-          <StarPicker value={texture} onChange={setTexture} />
-        </View>
-        <View style={styles.ratingRow}>
-          <ThemedText style={styles.ratingLabel}>Value</ThemedText>
-          <StarPicker value={value} onChange={setValue} />
-        </View>
+        <TasteSlider value={taste} onChange={setTaste} />
 
         <TextInput
           style={[
@@ -268,29 +505,29 @@ const styles = StyleSheet.create({
   ratingSection: {
     padding: 20,
     gap: 4,
+    alignItems: 'center',
   },
   sectionTitle: {
-    marginBottom: 16,
+    marginBottom: 2,
+    textAlign: 'center',
   },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  ratingLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+  sectionHint: {
+    fontSize: 13,
+    opacity: 0.5,
+    textAlign: 'center',
+    marginBottom: 12,
   },
   commentInput: {
+    alignSelf: 'stretch',
     borderWidth: 1,
     borderRadius: 10,
     padding: 12,
     fontSize: 15,
-    marginTop: 8,
+    marginTop: 24,
     minHeight: 80,
   },
   button: {
+    alignSelf: 'stretch',
     marginTop: 20,
     borderRadius: 12,
     padding: 16,
