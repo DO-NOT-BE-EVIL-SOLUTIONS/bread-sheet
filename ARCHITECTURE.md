@@ -32,6 +32,11 @@ The mobile app is the primary entry point for users.
   │   │   ├── index.tsx     # Home tab — ratings history + recently opened
   │   │   ├── scan.tsx      # Barcode scanner tab
   │   │   └── profile.tsx   # User profile & settings tab
+  │   ├── (account)/        # Account management screens
+  │   │   ├── change-email.tsx
+  │   │   ├── change-password.tsx
+  │   │   ├── upgrade.tsx   # Guest → registered account conversion
+  │   │   └── verify-email.tsx
   │   ├── _layout.tsx       # Root layout (SessionProvider + RecentProductsProvider)
   │   └── modal.tsx
   ├── components/           # Shared, reusable UI components
@@ -46,8 +51,8 @@ The mobile app is the primary entry point for users.
   ```
 
 - **State Management:** React Context is used for lightweight global state (session, recently viewed products). Hooks in `hooks/` encapsulate the context consumers (`use-session`, `use-recent-products`).
-- **UI:** The UI is built with standard React Native components, potentially extended with a library like React Native Paper or Tamagui as hinted in the `README.md`.
-- **Navigation:** **React Navigation** handles all in-app navigation, including the main tab bar and nested stacks.
+- **UI:** The UI is built with standard React Native components.
+- **Navigation:** **Expo Router** (file-based routing, wrapping React Navigation) handles all in-app navigation, including the main tab bar and nested stacks.
 
 ### b. Backend (`server`)
 
@@ -67,7 +72,8 @@ The server is a standard Node.js application responsible for all core logic.
   │   ├── routes/        # API route definitions
   │   └── services/      # Business logic and external service integrations
   ├── Dockerfile         # Defines the container for the server
-  └── index.ts           # Application entry point
+  ├── src/app.ts         # Express app setup (middleware, routes)
+  └── src/server.ts      # HTTP server entry point
   ```
 
 - **Database Interaction:** Uses **Prisma** to interact with the PostgreSQL database, providing a type-safe data access layer.
