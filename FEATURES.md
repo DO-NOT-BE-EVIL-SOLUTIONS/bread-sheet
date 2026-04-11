@@ -74,12 +74,20 @@ User History
 ## Phase 4: Social & History
 
 ### [TICKET-006] User History
-**Goal:** Display a list of items the user has previously rated.
-**UI:** A simple `FlatList` in a profile/history tab.
+**Goal:** Display a list of items the user has previously rated, and recently opened products.
+**UI:** Home tab with two sections: "My Ratings" and "Recently Opened".
 **Backend:** Endpoint `GET /users/me/ratings`.
+**Implementation:**
+- Home tab (`app/(tabs)/index.tsx`) fetches rating history via `GET /api/users/me/ratings` for registered users.
+- Each rating card shows product thumbnail, name, brand, star score, optional comment, and relative timestamp.
+- "Recently Opened" section is tracked in-memory via `RecentProductsProvider` context (`hooks/use-recent-products.tsx`). The product screen records a view whenever a product loads successfully.
+- Guest users see a sign-up prompt instead of ratings; recently opened still works for guests.
+- Pull-to-refresh reloads the ratings list.
 **Acceptance Criteria:**
-- [ ] List displays product name, image, and user's score.
-- [ ] Clicking an item navigates to details.
+- [x] List displays product name, image, and user's score.
+- [x] Clicking an item navigates to the product/rating screen.
+- [x] Recently opened products are shown even before rating.
+- [x] Guest users see a contextual prompt to create an account.
 
 ### [TICKET-007] Group Management
 **Goal:** Enable private sharing contexts.

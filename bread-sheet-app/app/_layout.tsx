@@ -3,6 +3,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { SessionProvider, useSession } from '@/hooks/use-session';
+import { RecentProductsProvider } from '@/hooks/use-recent-products';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useEffect } from 'react';
 
@@ -46,7 +47,9 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <SessionProvider>
-        <RootLayoutNav />
+        <RecentProductsProvider>
+          <RootLayoutNav />
+        </RecentProductsProvider>
       </SessionProvider>
       <StatusBar style="auto" />
     </ThemeProvider>
