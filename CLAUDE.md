@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-BreadSheet is a food rating/social app. Users scan barcodes, discover products, rate them (taste, texture, value), and share within groups. The monorepo has three main pillars:
+BreadSheet is a food rating/social app. Users scan barcodes, discover products, rate them by taste (0–10), and share within groups. The monorepo has three main pillars:
 
 - `bread-sheet-app/` — React Native/Expo mobile frontend
 - `server/` — Node.js/Express REST API backend
@@ -55,12 +55,13 @@ cd server && npx prisma studio
 - `(auth)/` — unauthenticated screens (login, signup, guest)
 - `(tabs)/` — main app tab navigation (authenticated)
 - `(app)/` — additional authenticated screens
+- `(account)/` — account management screens (change email/password, upgrade, verify email)
 
 **Auth gate:** `app/_layout.tsx` wraps the app in `<SessionProvider>`. The session hook (`hooks/use-session.tsx`) listens to `supabase.auth.onAuthStateChange()` and drives redirects — no session → `/(auth)/login`, session → `/(tabs)`.
 
 **Supabase client** is initialized in `lib/supabase.ts` using `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`.
 
-**Feature modules** live in `features/` (auth, food, groups) — keep business logic there, not in route files.
+**Feature modules** live in `features/` (currently `auth/`) — keep business logic there, not in route files.
 
 ### Backend
 
@@ -78,7 +79,7 @@ cd server && npx prisma studio
 
 ### Data Model (Prisma schema at `server/prisma/schema.prisma`)
 
-Core models: `User`, `Product` (barcode/brand/image), `Rating` (taste/texture/value scores + comments), `Group`, `GroupMember` (roles: ADMIN/MEMBER), `Item`.
+Core models: `User`, `Product` (barcode/brand/image), `Rating` (taste score 0–10 in 0.5 steps + optional comment), `Group`, `GroupMember` (roles: ADMIN/MEMBER), `Item`.
 
 ### Auth Flow
 

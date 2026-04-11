@@ -4,7 +4,7 @@
 
 ## Key Features
 
-* **Rate by Taste:** Simple, intuitive interface to rate food based on taste, texture, and value.
+* **Rate by Taste:** Simple, intuitive interface to rate food based on taste (0–10, 0.5-step precision).
 * **Scan & Discover:** Integrated barcode scanner (EAN/UPC) to instantly find products or fetch metadata via Open Food Facts.
 * **Add Products:** Crowdsource the database by adding new items if they don't exist.
 * **Social Groups:** Create groups (e.g., "Office Snacks", "Family Dinners") to share ratings and recommendations specifically with them.
@@ -16,8 +16,7 @@
 
 * **Framework:** [Expo](https://expo.dev/) (React Native)
 * **Navigation:** React Navigation (Stack & Tabs)
-* **UI Library:** React Native Paper / Tamagui
-* **State Management:** Zustand (for lightweight global state)
+* **State Management:** React Context (session, recently viewed products)
 * **Scanning:** `expo-camera`
 
 ### Backend (API)

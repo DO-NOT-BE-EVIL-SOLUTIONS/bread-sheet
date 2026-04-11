@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function ScanScreen() {
@@ -8,6 +8,17 @@ export default function ScanScreen() {
   const router = useRouter();
   const scanLock = useRef(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [scanningActive, setScanningActive] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      setScanningActive(true);
+      return () => {
+        setScanningActive(false);
+        scanLock.current = false;
+      };
+    }, [])
+  );
 
   if (!permission) return <View style={styles.container} />;
 
@@ -38,7 +49,7 @@ export default function ScanScreen() {
         style={StyleSheet.absoluteFillObject}
         facing="back"
         enableTorch={torchOn}
-        onBarcodeScanned={handleBarcodeScanned}
+        onBarcodeScanned={scanningActive ? handleBarcodeScanned : undefined}
         barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }}
       />
 
