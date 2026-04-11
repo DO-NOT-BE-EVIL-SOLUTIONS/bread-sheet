@@ -4,14 +4,15 @@ import {
   Animated,
   Image,
   PanResponder,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  useColorScheme,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
@@ -63,10 +64,8 @@ function TasteSlider({ value, onChange }: { value: number; onChange: (v: number)
   const MIN = 0;
   const MAX = 10;
   const STEP = 0.5;
-  const STEPS = (MAX - MIN) / STEP; // 20 intervals
 
   const trackRef = useRef<View>(null);
-  const trackX = useRef(0);
   const startX = useRef(0);
   const startVal = useRef(value);
 
@@ -80,7 +79,7 @@ function TasteSlider({ value, onChange }: { value: number; onChange: (v: number)
       speed: 30,
       bounciness: 4,
     }).start();
-  }, [value]);
+  }, [thumbAnim, value]);
 
   const snap = (raw: number) => {
     const clamped = Math.max(MIN, Math.min(MAX, raw));
@@ -144,8 +143,7 @@ function TasteSlider({ value, onChange }: { value: number; onChange: (v: number)
         >
           {/* Fill */}
           <Animated.View
-            style={[sliderStyles.trackFill, { width: fillWidth, backgroundColor: color }]}
-            pointerEvents="none"
+            style={[sliderStyles.trackFill, { width: fillWidth, backgroundColor: color, pointerEvents: 'none' }]}
           />
           {/* Tick marks at whole numbers */}
           {Array.from({ length: 11 }, (_, i) => i).map((n) => (
@@ -162,9 +160,8 @@ function TasteSlider({ value, onChange }: { value: number; onChange: (v: number)
           <Animated.View
             style={[
               sliderStyles.thumb,
-              { left: thumbAnim, backgroundColor: color },
+              { left: thumbAnim, backgroundColor: color, pointerEvents: 'none' },
             ]}
-            pointerEvents="none"
           />
         </View>
 
@@ -275,11 +272,16 @@ const sliderStyles = StyleSheet.create({
     borderRadius: THUMB_SIZE / 2,
     marginLeft: -(THUMB_SIZE / 2),
     top: -(THUMB_SIZE - TRACK_HEIGHT) / 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
     elevation: 4,
+    ...Platform.select({
+      web: { boxShadow: '0px 2px 4px rgba(0,0,0,0.18)' },
+      default: {
+        shadowColor: '#000',
+        shadowOpacity: 0.18,
+        shadowOffset: { width: 0, height: 2 },
+        shadowRadius: 4,
+      },
+    }),
   },
   labelsRow: {
     flexDirection: 'row',
@@ -298,7 +300,7 @@ const sliderStyles = StyleSheet.create({
 
 export default function ProductScreen() {
   const { barcode } = useLocalSearchParams<{ barcode: string }>();
-  const colorScheme = useColorScheme() ?? 'light';
+  const colorScheme = useColorScheme();
   const colors = Colors[colorScheme];
   const router = useRouter();
 
@@ -326,7 +328,7 @@ export default function ProductScreen() {
       .catch((err: Error) => { if (!cancelled) setLoadError(err.message ?? 'Failed to load product'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [barcode]);
+  }, [addRecentProduct, barcode]);
 
   const handleSubmit = useCallback(async () => {
     if (!product || submitting) return;
