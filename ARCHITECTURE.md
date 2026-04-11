@@ -70,8 +70,9 @@ The server is a standard Node.js application responsible for all core logic.
   └── index.ts           # Application entry point
   ```
 
-- **Database Interaction:** It likely uses an ORM like **Prisma** (as suggested in the `README.md`) to interact with the PostgreSQL database, providing a type-safe data access layer.
+- **Database Interaction:** Uses **Prisma** to interact with the PostgreSQL database, providing a type-safe data access layer.
 - **API:** Exposes a RESTful API for the mobile client to consume. Endpoints cover functionalities like user authentication, creating ratings, managing groups, and fetching product information.
+- **Rating model:** A `Rating` stores a single `taste` score — a `Float` on a **0–10 scale with 0.5-step precision** (e.g. 0, 0.5, 1, …, 10). The `score` field mirrors `taste` directly. Texture and value dimensions were intentionally removed to keep the rating fast and focused.
 
 ### c. Infrastructure (`terraform` & `docker`)
 

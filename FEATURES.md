@@ -6,7 +6,7 @@
 **Key Models:**
 - `User`: ID, email (optional), username, avatar.
 - `Product`: Barcode (unique), name, brand, image_url, generic_name.
-- `Rating`: UserID, ProductID, taste_score, texture_score, value_score, comment.
+- `Rating`: UserID, ProductID, taste (Float 0–10 in 0.5 steps), comment.
 - `Group`: Name, invite_code.
 **Acceptance Criteria:**
 - [x] Schema defined in `server/prisma/schema.prisma`.
@@ -59,16 +59,16 @@ Key Models:
 ## Phase 3: The Rating Core
 
 ### [TICKET-005] Product Detail & Rating UI
-**Goal:** Display product info and allow users to submit ratings.
+**Goal:** Display product info and allow users to submit a taste rating.
 **UI:**
 - Header with Product Image and Name.
-- Sliders or Star inputs for Taste, Texture, and Value.
+- Custom `TasteSlider` component: draggable track 0–10 with 0.5-step snapping, large animated score badge (colour-coded amber → green), and −/+ stepper buttons.
+- Optional comment field.
 - "Submit" button.
-**State:** Use `zustand` for form state if complex.
 **Acceptance Criteria:**
 - [x] User can view product details.
-- [x] User can adjust rating values.
-- [x] Submit button sends `POST` request to backend.
+- [x] User can set taste score 0–10 in 0.5 increments.
+- [x] Submit button sends `POST` request to backend with `{ barcode, taste, comment? }`.
 User History
 
 ## Phase 4: Social & History

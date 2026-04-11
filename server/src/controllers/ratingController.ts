@@ -4,14 +4,26 @@ import { AuthRequest } from '../middlewares/authMiddleware.js';
 import logger from '../logger.js';
 
 // POST /api/ratings
-// Body: { barcode, taste, texture, value, comment? }
+// Body: { barcode, taste, comment? }
+// taste: Float 0–10 in 0.5 increments (e.g. 0, 0.5, 1, ..., 10)
 export const createRating = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.id;
-    const { barcode, taste, texture, value, comment } = req.body;
+    const { barcode, taste, comment } = req.body;
 
-    if (!barcode || taste == null || texture == null || value == null) {
-      return res.status(400).json({ message: 'barcode, taste, texture, and value are required' });
+    if (!barcode || taste == null) {
+      return res.status(400).json({ message: 'barcode and taste are required' });
+    }
+
+    // Validate taste is in range and on a 0.5 boundary
+    const tasteNum = Number(taste);
+    if (
+      isNaN(tasteNum) ||
+      tasteNum < 0 ||
+      tasteNum > 10 ||
+      (tasteNum * 2) % 1 !== 0  // must be a multiple of 0.5
+    ) {
+      return res.status(400).json({ message: 'taste must be between 0 and 10 in 0.5 increments' });
     }
 
     const product = await prisma.product.findUnique({ where: { barcode } });
@@ -19,22 +31,18 @@ export const createRating = async (req: AuthRequest, res: Response, next: NextFu
       return res.status(404).json({ message: 'Product not found. Fetch it via GET /api/products/:barcode first.' });
     }
 
-    const score = Math.round((taste + texture + value) / 3);
-
     const rating = await prisma.rating.create({
       data: {
         userId,
         productId: product.id,
-        taste,
-        texture,
-        value,
-        score,
+        taste: tasteNum,
+        score: tasteNum,  // score mirrors taste (single dimension)
         comment: comment ?? null,
       },
       include: { product: true },
     });
 
-    logger.info(`Rating created by ${userId} for product ${barcode}`);
+    logger.info(`Rating created by ${userId} for product ${barcode}: taste=${tasteNum}`);
     res.status(201).json(rating);
   } catch (error) {
     logger.error(error);
