@@ -116,3 +116,22 @@ EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=...
 
 Architecture decisions are tracked in `docs/architecture-decision-records/`. Current ADRs:
 - `0001-auth-provider.md` — Why Supabase Auth was chosen over alternatives
+
+## Mandatory Post-Implementation Steps
+
+These steps are **required** after every implementation or code change, without exception:
+
+### 1. Tests
+- After implementing or modifying any feature, add or update tests to cover the new behaviour.
+- Backend: integration tests live in `server/src/__tests__/`. Run `npm test` in `server/` to verify the full suite passes before considering work done.
+- Frontend: component and hook tests live alongside their source files. Run `npm test` in `bread-sheet-app/` to verify.
+- Never leave a test suite in a failing state. If pre-existing tests break due to your change, fix them — do not skip or comment them out.
+
+### 2. Documentation
+After any implementation, update all affected documentation files before finishing:
+- **`CLAUDE.md`** (this file) — update if the architecture, middleware stack, data model, commands, or environment variables change.
+- **`README.md`** — update if setup steps, running instructions, or project structure change.
+- **`docs/architecture-decision-records/`** — add a new ADR if the implementation introduces a significant architectural choice (new library, infrastructure pattern, auth approach, etc.).
+- Any inline code comments or JSDoc on public interfaces that are now outdated.
+
+The documentation must reflect the code as shipped, not the code as it was before your change.

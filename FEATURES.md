@@ -395,3 +395,16 @@ User History
 - [ ] A group `ADMIN` can perform all admin-only actions within their group.
 - [ ] Ownership guards are implemented as composable middleware, not adD-hoc per-controller checks.
 - [ ] All new authorization rules are covered by integration tests.
+
+# Future Plans and Ideas
+
+## Release
+- Create Terms and Conditions
+- Create Data Protection Documentation
+- GDPR info and endpoints (user info request, user deletion request)
+- PlayStore Process
+- iOS Appstore Process
+
+## User Engagement
+- Create User Role "Moderator" which can review multiple products in a row
+
