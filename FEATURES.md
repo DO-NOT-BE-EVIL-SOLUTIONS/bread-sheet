@@ -89,7 +89,7 @@ User History
 - [x] Recently opened products are shown even before rating.
 - [x] Guest users see a contextual prompt to create an account.
 
-### [TICKET-007] Group Management
+### [TICKET-008] Group Management
 **Goal:** Enable private sharing contexts.
 **Logic:**
 - Users create a group -> generate shareable code.
@@ -102,7 +102,7 @@ User History
 
 ## Phase 5: Auth Enhancements
 
-### [TICKET-008] Social Login Providers (Google, Apple)
+### [TICKET-009] Social Login Providers (Google, Apple)
 **Goal:** Allow users to sign in and upgrade guest accounts using OAuth providers, reducing friction compared to email/password.
 **Implementation:**
 - **Supabase:** Enable Google and Apple providers in the Supabase dashboard. Configure OAuth credentials from Google Cloud Console and Apple Developer Console.
@@ -118,3 +118,25 @@ User History
 - [ ] User can sign in with Apple on iOS.
 - [ ] Anonymous user can link a Google or Apple account from the upgrade screen.
 - [ ] Linking a provider to an existing anonymous account preserves all user data.
+
+### [TICKET-010] API Authorization — Roles & Resource Ownership
+**Goal:** Enforce that users can only access or modify resources they own or are permitted to reach via group membership/role, preventing horizontal privilege escalation.
+**Scope:**
+- **User resources:** `GET /users/:id`, `PATCH /users/:id`, and any user-scoped sub-resources (ratings, history) must only be accessible by the user themselves. No other user may read or mutate another user's private data.
+- **Group resources:** All group endpoints (`GET/PATCH/DELETE /groups/:id`, member lists, invite codes) must verify the requesting user is a member of that group. Write/admin operations (rename, delete group, kick members, regenerate invite code) must additionally require the `ADMIN` role within that group.
+- **Rating resources:** `PATCH` and `DELETE` on a rating must verify the rating belongs to the authenticated user.
+- **Middleware pattern:** Implement reusable Express middleware / guard helpers (e.g. `requireSelf`, `requireGroupMember`, `requireGroupAdmin`) that can be composed on any route, rather than inlining ownership checks in every controller.
+**Implementation:**
+- Add `requireSelf(paramName)` middleware: compares `req.user.id` against the route param; throws `403 Forbidden` on mismatch.
+- Add `requireGroupMember` middleware: looks up `GroupMember` record for `(req.user.id, groupId)`; throws `403` if not found.
+- Add `requireGroupAdmin` middleware: same lookup but also asserts `role === 'ADMIN'`.
+- Apply guards in the router layer so controllers receive only already-authorized requests.
+- Return `403 Forbidden` (not `404`) when the resource exists but the user is not permitted — leaking resource existence to unauthorized users is a separate concern and can be addressed per-endpoint.
+- Add integration tests covering: own resource access succeeds, cross-user access returns `403`, non-member group access returns `403`, member-only group admin action returns `403`.
+**Acceptance Criteria:**
+- [ ] A user cannot read or modify another user's profile, ratings, or history.
+- [ ] A non-member cannot read any data from a group they do not belong to.
+- [ ] A group `MEMBER` cannot perform admin-only actions (delete group, manage members, regenerate code).
+- [ ] A group `ADMIN` can perform all admin-only actions within their group.
+- [ ] Ownership guards are implemented as composable middleware, not ad-hoc per-controller checks.
+- [ ] All new authorization rules are covered by integration tests.
