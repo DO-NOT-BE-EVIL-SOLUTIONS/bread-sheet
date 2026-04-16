@@ -1,0 +1,144 @@
+# Backend Architecture
+
+Node.js / Express / TypeScript API server. Follows an MVC pattern: Routes → Controllers → Services → Database.
+
+---
+
+## Directory Structure
+
+```
+server/
+├── src/
+│   ├── app.ts                   # Express app setup: middleware stack, route mounting
+│   ├── server.ts                # HTTP server entry point
+│   ├── configs/                 # Environment variable loading and validation
+│   ├── controllers/             # Request/response handlers — thin, delegate to services
+│   ├── middlewares/             # Express middleware (auth, rate limiting, error handler)
+│   ├── routes/                  # Route definitions — apply middleware, call controllers
+│   ├── services/                # Business logic and external integrations
+│   │   └── imageService.ts      # sharp-based format conversion; upload to S3 raw/ prefix
+│   └── generated/
+│       └── prisma_client/       # Generated Prisma client — always import from here
+├── prisma/
+│   ├── schema.prisma            # Source of truth for the data model
+│   └── migrations/              # Applied migration history
+└── Dockerfile
+```
+
+---
+
+## Middleware Stack
+
+Applied in order in `app.ts`:
+
+| Order | Middleware | Scope | Purpose |
+|-------|-----------|-------|---------|
+| 1 | `apiLimiter` | `POST /api/*` | 100 req / 15 min — broad API rate limit |
+| 2 | `authLimiter` | auth endpoints | 10 req / hr — tighter limit on auth routes |
+| 3 | `requireAuth` | protected routes | Validates Supabase Bearer JWT; injects `req.user` |
+| 4 | `requireRegistered` | contribution routes | Checks `is_anonymous !== true`; rejects guests with `403` |
+| 5 | `requireSelf(param)` | user-scoped routes | Compares `req.user.id` to route param; `403` on mismatch |
+| 6 | `requireGroupMember` | group routes | Verifies `GroupMember` record exists; `403` if not |
+| 7 | `requireGroupAdmin` | group admin routes | Same as above + asserts `role === 'ADMIN'` |
+| 8 | Controllers | — | Handle request, call service, send response |
+| 9 | `errorHandler` | global | Centralised error formatting; maps known errors to HTTP status codes |
+
+Authorization guards (5–7) are composable and applied at the **router layer**, not inside controllers.
+
+---
+
+## Data Model
+
+Full schema: `server/prisma/schema.prisma`. Summary of core models:
+
+| Model | Key fields | Notes |
+|-------|-----------|-------|
+| `User` | `id`, `email?`, `username`, `avatarUrl` | `id` mirrors the Supabase user UUID |
+| `Product` | `barcode` (PK), `name`, `brand`, `imageUrl`, `status`, `submittedByUserId?` | `status`: `VERIFIED \| PENDING_REVIEW \| REJECTED` |
+| `Rating` | `userId`, `productId`, `taste` (Float 0–10, 0.5 steps), `comment?` | One rating per user per product |
+| `Group` | `id`, `name`, `inviteCode` | Invite code is unique |
+| `GroupMember` | `userId`, `groupId`, `role` | `role`: `ADMIN \| MEMBER` |
+| `ProductVerification` | `userId`, `barcode`, `createdAt` | Composite PK `(userId, barcode)`; 2 needed to promote to `VERIFIED` |
+| `ProductEdit` | `id`, `barcode`, `authorUserId`, `originalValues` (JSON), `proposedChanges` (JSON), `status` | `status`: `PENDING \| APPLIED \| REJECTED \| EXPIRED` |
+| `ProductEditVote` | `editId`, `userId`, `vote` | `vote`: `APPROVE \| REJECT`; composite unique `(editId, userId)` |
+| `ProductEditDismissal` | `editId`, `userId` | Persists reviewer dismissals server-side |
+
+**Prisma import:** Always import the client from `src/generated/prisma_client`, never from `@prisma/client` directly.
+
+---
+
+## API Endpoints
+
+### Products
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/products/:barcode` | Any | Fetch product (Open Food Facts fallback on miss) |
+| `POST` | `/products` | Registered | Submit new product (`PENDING_REVIEW`) |
+| `PATCH` | `/products/:barcode` | Registered | Correct a `PENDING_REVIEW` product (resets verifications) |
+| `POST` | `/products/extract-label` | Registered | Structure nutritional data from OCR text or label image |
+| `POST` | `/products/:barcode/verify` | Registered, non-submitter | Cast approval verification |
+| `DELETE` | `/products/:barcode/verify` | Registered | Retract own verification |
+| `POST` | `/products/:barcode/edits` | Registered | Propose edit to `VERIFIED` product |
+| `GET` | `/products/:barcode/edits/pending` | Registered | Fetch pending edit + diff for reviewer |
+| `POST` | `/products/edits/:editId/votes` | Registered, non-author | Vote `APPROVE` or `REJECT` on an edit |
+| `DELETE` | `/products/edits/:editId/votes` | Registered | Retract own edit vote |
+
+### Users
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/users/me` | Self | Fetch own profile |
+| `PATCH` | `/users/me` | Self | Update own profile |
+| `GET` | `/users/me/ratings` | Self | Fetch own rating history |
+
+### Groups
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/groups` | Registered | Create group |
+| `GET` | `/groups/:id` | Member | Fetch group details |
+| `PATCH` | `/groups/:id` | Admin | Update group name |
+| `DELETE` | `/groups/:id` | Admin | Delete group |
+| `POST` | `/groups/join` | Registered | Join group by invite code |
+| `DELETE` | `/groups/:id/members/:userId` | Admin | Remove member |
+
+### Auth / Ratings
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/ratings` | Any | Submit or update a rating |
+| `DELETE` | `/ratings/:id` | Owner | Delete own rating |
+
+---
+
+## Image Processing
+
+1. **API (synchronous):** Validates raw upload (size gate: 8 MB max via `multer`; format detection via magic bytes). Converts non-JPEG/WebP to JPEG using `sharp` in `imageService.ts`. Rejects unsupported formats (`415`).
+2. **Upload:** Uploads the validated JPEG to S3 at `raw/product/{uuid}.jpg` or `raw/label/{uuid}.jpg`.
+3. **Lambda (async):** S3 `ObjectCreated` event triggers the resize Lambda. Writes to `processed/{uuid}.jpg` with the appropriate dimension cap (1200 px product / 1600 px label).
+4. **Response:** API returns the predicted `processed/` URL immediately — does not wait for Lambda.
+
+---
+
+## Label Extraction
+
+`POST /products/extract-label` has two paths:
+
+| Input | Path | Model |
+|-------|------|-------|
+| `{ rawText: string }` (≥ `MIN_OCR_LENGTH` chars) | Text path | Claude text API — cheaper |
+| Multipart image | Vision path (fallback) | Claude vision API |
+
+Response always includes a `confidence: low \| medium \| high` field. The client uses this to choose the default fill mode (low → "Fill manually"; medium/high → "Pre-fill & edit").
+
+---
+
+## Background Jobs
+
+Runs as node-cron jobs inside the server process:
+
+| Job | Schedule | Purpose |
+|-----|----------|---------|
+| OFF sync | Every 5 min | Submits `VERIFIED` products/edits to Open Food Facts |
+| Edit expiry | Daily | Marks `ProductEdit` records with no votes after 30 days as `EXPIRED` |
