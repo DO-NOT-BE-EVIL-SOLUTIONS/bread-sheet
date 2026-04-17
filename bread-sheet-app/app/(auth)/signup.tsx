@@ -3,7 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { isValidEmail, signUp } from '@/features/auth';
-import { Link, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
@@ -14,11 +14,17 @@ import {
   TouchableOpacity,
 } from 'react-native';
 
+import {
+  clearPendingReturnTo,
+  setPendingReturnTo,
+} from '@/lib/pending-return-to';
+
 export default function SignUpScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const tint = Colors[colorScheme].tint;
   const bg = Colors[colorScheme].background;
   const router = useRouter();
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
 
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -31,9 +37,21 @@ export default function SignUpScreen() {
       return;
     }
     setLoading(true);
+    // Persist the intended post-signup destination BEFORE kicking off auth.
+    // The email magic link cold-launches the app and destroys in-memory
+    // navigation state, so this intent must survive on disk.
+    if (returnTo) {
+      await setPendingReturnTo(returnTo);
+    }
     const { data: { session }, error } = await signUp(email, password);
-    if (error) Alert.alert('Sign up failed', error.message);
-    else if (!session) router.replace({ pathname: '/(auth)/verify-email', params: { email } });
+    if (error) {
+      // Signup failed — clear the pending return so normal post-auth routing
+      // applies if the user tries something else next.
+      await clearPendingReturnTo();
+      Alert.alert('Sign up failed', error.message);
+    } else if (!session) {
+      router.replace({ pathname: '/(auth)/verify-email', params: { email } });
+    }
     setLoading(false);
   }
 

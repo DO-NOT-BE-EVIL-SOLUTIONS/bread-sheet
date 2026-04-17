@@ -5,7 +5,12 @@ import 'react-native-reanimated';
 import { SessionProvider, useSession } from '@/hooks/use-session';
 import { RecentProductsProvider } from '@/hooks/use-recent-products';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+
+import {
+  clearPendingReturnTo,
+  getPendingReturnTo,
+} from '@/lib/pending-return-to';
 
 export const unstable_settings = {
   initialRouteName: '(tabs)',
@@ -17,13 +22,32 @@ function RootLayoutNav() {
   const { session, isLoading, isAnonymous } = useSession();
   const segments = useSegments();
   const router = useRouter();
+  const handlingReturnTo = useRef(false);
 
   useEffect(() => {
     if (isLoading) return;
     const inAuthenticatedGroup = AUTHENTICATED_GROUPS.includes(segments[0] as string);
     const inAuthGroup = segments[0] === '(auth)';
+
     if (session && !isAnonymous && !inAuthenticatedGroup) {
-      router.replace('/(tabs)');
+      // Before doing the default post-signin redirect to /(tabs), honour any
+      // pending return-to hint stored at signup time (e.g. the user was on a
+      // product-not-found screen when they kicked off signup).
+      if (handlingReturnTo.current) return;
+      handlingReturnTo.current = true;
+      (async () => {
+        try {
+          const returnTo = await getPendingReturnTo();
+          if (returnTo) {
+            await clearPendingReturnTo();
+            router.replace(returnTo as never);
+            return;
+          }
+          router.replace('/(tabs)');
+        } finally {
+          handlingReturnTo.current = false;
+        }
+      })();
     } else if (!session && !inAuthGroup) {
       router.replace('/(auth)/login');
     }
