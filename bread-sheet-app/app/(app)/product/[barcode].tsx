@@ -18,8 +18,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { useRecentProducts } from '@/hooks/use-recent-products';
+import { useSession } from '@/hooks/use-session';
 
 interface Product {
   id: string;
@@ -305,9 +306,11 @@ export default function ProductScreen() {
   const router = useRouter();
 
   const { addRecentProduct } = useRecentProducts();
+  const { isAnonymous } = useSession();
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [taste, setTaste] = useState(5);
@@ -318,6 +321,8 @@ export default function ProductScreen() {
 
   useEffect(() => {
     let cancelled = false;
+    setNotFound(false);
+    setLoadError(null);
     api.get<Product>(`/api/products/${barcode}`)
       .then((data) => {
         if (!cancelled) {
@@ -325,7 +330,14 @@ export default function ProductScreen() {
           addRecentProduct({ barcode: data.barcode, name: data.name, brand: data.brand, image: data.image });
         }
       })
-      .catch((err: Error) => { if (!cancelled) setLoadError(err.message ?? 'Failed to load product'); })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 404) {
+          setNotFound(true);
+        } else {
+          setLoadError(err instanceof Error ? err.message : 'Failed to load product');
+        }
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [addRecentProduct, barcode]);
@@ -360,6 +372,58 @@ export default function ProductScreen() {
     return (
       <ThemedView style={styles.center}>
         <ThemedText style={styles.errorText}>{loadError}</ThemedText>
+      </ThemedView>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <ThemedView style={styles.center} testID="product-not-found">
+        <Text style={styles.successIcon}>🤔</Text>
+        <ThemedText type="title" style={styles.successTitle}>
+          Product not found
+        </ThemedText>
+        <ThemedText style={styles.notFoundBody}>
+          This product isn&apos;t in the database yet.
+        </ThemedText>
+        <ThemedText style={styles.barcodeChip}>{barcode}</ThemedText>
+
+        {isAnonymous ? (
+          <>
+            <ThemedText style={styles.notFoundHint}>
+              Sign up to help add it.
+            </ThemedText>
+            <TouchableOpacity
+              testID="product-not-found-signup"
+              style={[styles.button, { backgroundColor: colors.tint }]}
+              onPress={() =>
+                router.push({
+                  pathname: '/(auth)/signup',
+                  params: { returnTo: `/product/${barcode}` },
+                })
+              }
+            >
+              <Text style={[styles.buttonText, { color: colors.background }]}>
+                Sign up
+              </Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity
+            testID="product-not-found-add"
+            style={[styles.button, { backgroundColor: colors.tint }]}
+            onPress={() =>
+              router.push({
+                pathname: '/(app)/add-product',
+                params: { barcode },
+              })
+            }
+          >
+            <Text style={[styles.buttonText, { color: colors.background }]}>
+              Add this product
+            </Text>
+          </TouchableOpacity>
+        )}
       </ThemedView>
     );
   }
@@ -557,5 +621,17 @@ const styles = StyleSheet.create({
   successSubtitle: {
     opacity: 0.6,
     textAlign: 'center',
+  },
+  notFoundBody: {
+    fontSize: 15,
+    textAlign: 'center',
+    opacity: 0.8,
+    marginTop: 4,
+  },
+  notFoundHint: {
+    fontSize: 14,
+    textAlign: 'center',
+    opacity: 0.6,
+    marginTop: 8,
   },
 });
