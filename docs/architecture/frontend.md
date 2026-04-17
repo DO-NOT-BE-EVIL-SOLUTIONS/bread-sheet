@@ -100,7 +100,7 @@ session + not in authenticated group  → router.replace('/(tabs)')
 no session                            → router.replace('/(auth)/login')
 ```
 
-Post-signup deep-link return: before any auth call that triggers email verification, the calling screen persists the intended destination to disk via `lib/pending-return-to.ts` (backed by `expo-file-system/legacy` under the key `pendingReturnTo`). On `SIGNED_IN`, the guard reads and clears this key and navigates there instead of `/(tabs)`. A `handlingReturnTo` ref guards the async read against re-entry while the effect is pending.
+Post-signup deep-link return: before any auth call that triggers email verification, the calling screen persists the intended destination to `AsyncStorage` under `pendingReturnTo`. On `SIGNED_IN`, the guard reads and clears this key and navigates there instead of `/(tabs)`.
 
 ---
 
@@ -154,42 +154,6 @@ features/auth → signOut()
 
 ---
 
-## HTTP Client — `lib/api.ts`
-
-Thin typed wrapper around `fetch` used by all route files that talk to the backend. Requests automatically attach the Supabase bearer token for the current session.
-
-Errors surface as an `ApiError` class that carries both the HTTP `status` and the parsed response `body`:
-
-```ts
-try {
-  const product = await api.get<Product>(`/products/${barcode}`);
-} catch (err) {
-  if (err instanceof ApiError && err.status === 404) {
-    // render product-not-found UI
-  }
-}
-```
-
-Keeping the status on the error means routes can branch on HTTP semantics without re-parsing strings. The `lib/api.test.ts` suite covers the happy path, 404 handling, and non-JSON error bodies.
-
----
-
-## Pending Return-To — `lib/pending-return-to.ts`
-
-Small persistent key-value store for a single deep-link destination, backed by a text file under `expo-file-system/legacy`'s `documentDirectory`. Chosen over `@react-native-async-storage/async-storage` to avoid an extra native dependency — the behaviour is equivalent.
-
-API:
-
-| Function | Purpose |
-|----------|---------|
-| `setPendingReturnTo(path)` | Persist the intended post-auth destination |
-| `getPendingReturnTo()` | Read the persisted destination (or `null`) |
-| `clearPendingReturnTo()` | Remove it — called on success and on auth failure |
-
-Used by the signup screen (before calling `signUp()`) and by `app/_layout.tsx` (on the post-signin redirect path). An in-memory cache keeps same-boot reads synchronous-ish; cold starts fall through to disk.
-
----
-
 ## State Management
 
 React Context is used for lightweight global state. All context providers are composed in `app/_layout.tsx`:
@@ -218,26 +182,6 @@ The **Profile tab** adapts to the user's account state:
 - Sign Out
 
 On web, confirmation dialogs use `window.confirm` (Alert.alert buttons are unsupported). On native, `Alert.alert` is used.
-
----
-
-## Product Screens
-
-`app/(app)/product/[barcode].tsx` is the single entry point for viewing a product. It fetches `GET /products/:barcode` and renders one of four states:
-
-| State | Trigger | UI |
-|-------|---------|----|
-| Loading | Initial fetch in flight | Spinner |
-| Found | 2xx response | Full product detail + rating UI |
-| Not found | `ApiError` with `status === 404` | Dedicated empty state (see below) |
-| Error | Any other failure | Error message with the thrown message |
-
-The **not-found** branch adapts to auth state via `useSession().isAnonymous`:
-
-- **Registered users** see an "Add this product" button (`testID="product-not-found-add"`) that navigates to `/(app)/add-product` with the barcode as a param.
-- **Anonymous users** see a "Sign up" button (`testID="product-not-found-signup"`) that navigates to `/(auth)/signup?returnTo=/product/[barcode]`. The signup screen persists this via `lib/pending-return-to.ts` and the root layout restores it on `SIGNED_IN` (see Auth Flows above).
-
-`app/(app)/add-product.tsx` is the landing page for adding a new product. P5-001 ships a stub that reads the barcode from route params and renders a placeholder; the full camera-assisted flow is P5-002. The stub enforces the registered-user guard as defence-in-depth if an anonymous user reaches it via a deep link.
 
 ---
 
