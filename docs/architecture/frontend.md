@@ -16,7 +16,7 @@ bread-sheet-app/
 ├── features/                    # Business logic grouped by domain
 │   └── auth/                    # Auth actions and validation (no UI)
 ├── hooks/                       # React context and custom hooks
-├── lib/                         # Third-party client singletons (Supabase, API)
+├── lib/                         # Third-party client singletons + small utilities (Supabase, API, pending-return-to)
 ├── components/                  # Shared UI components and design primitives
 │   └── ui/                      # Platform-bridging components (icons, etc.)
 └── constants/                   # Design tokens (colours, theme)
@@ -126,7 +126,7 @@ features/auth → signIn(email, password)
 
 ```
 features/auth → signUp(email, password)
-  → persist pendingReturnTo to AsyncStorage (if set)
+  → persist pendingReturnTo via lib/pending-return-to (if returnTo param is set)
   → email verification required before session is active
   → screen navigates to post-signup confirmation screen in (auth)/
   → user clicks magic link → app cold-launches

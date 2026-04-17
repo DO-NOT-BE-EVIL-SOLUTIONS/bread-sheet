@@ -105,13 +105,19 @@ User History
 - When the magic link returns the user to the app and `supabase.auth.onAuthStateChange` fires with a `SIGNED_IN` event, the auth completion logic in `app/_layout.tsx` reads `pendingReturnTo` from `AsyncStorage`, clears it, and navigates there instead of the default `/(tabs)` redirect — landing the user back on the product-not-found screen, now authenticated, where the "Add this product" button is visible.
 - If signup is abandoned or fails, `pendingReturnTo` is cleared from `AsyncStorage` and normal post-auth routing applies.
 **Acceptance Criteria:**
-- [ ] Scanning an unknown barcode shows a "Product not found" state (not an error/crash).
-- [ ] Registered users see the "Add this product" button; tapping navigates to the Add Product screen with the barcode pre-filled.
-- [ ] Anonymous users see the product-not-found message and a "Sign up" button — they are not automatically redirected.
-- [ ] Tapping "Sign up" navigates to the sign-up screen with `returnTo=/product/[barcode]` in the route params.
-- [ ] After completing signup, the user is returned to the product-not-found screen for that barcode, now seeing the "Add this product" button.
-- [ ] Abandoning signup mid-flow does not navigate to the product screen; normal post-auth routing applies.
-- [ ] Known products continue to render normally — no regression.
+- [x] Scanning an unknown barcode shows a "Product not found" state (not an error/crash).
+- [x] Registered users see the "Add this product" button; tapping navigates to the Add Product screen with the barcode pre-filled.
+- [x] Anonymous users see the product-not-found message and a "Sign up" button — they are not automatically redirected.
+- [x] Tapping "Sign up" navigates to the sign-up screen with `returnTo=/product/[barcode]` in the route params.
+- [x] After completing signup, the user is returned to the product-not-found screen for that barcode, now seeing the "Add this product" button.
+- [x] Abandoning signup mid-flow does not navigate to the product screen; normal post-auth routing applies.
+- [x] Known products continue to render normally — no regression.
+
+**Implementation notes:**
+- The 404 branch is driven off the typed `ApiError` class in `bread-sheet-app/lib/api.ts`, which carries the HTTP `status` so the product screen can distinguish "not found" from generic errors via `instanceof ApiError && err.status === 404`.
+- `pendingReturnTo` is persisted on disk by `bread-sheet-app/lib/pending-return-to.ts`. The implementation uses `expo-file-system/legacy` (writing a small text file under `documentDirectory`) rather than `@react-native-async-storage/async-storage` — the behaviour is identical from the callsite's perspective, but this keeps us free of an additional native dependency.
+- The signup screen persists `returnTo` *before* calling `signUp()` and clears it on failure; `app/_layout.tsx` reads and clears it on the post-signin redirect path (guarded by a ref so the async read cannot re-enter).
+- The Add Product screen (`app/(app)/add-product.tsx`) currently ships as a stub for this ticket; the full flow is P5-002. It still enforces the registered-user guard described there as defence-in-depth if an anonymous user reaches it via a deep link.
 
 ### [TICKET-P5-002] Add Product Screen — Camera-Assisted & Manual Entry
 **Goal:** Allow users to submit a new product with display image, nutritional label photo, and structured data, with on-device OCR + AI-assisted extraction reducing manual effort.

@@ -57,11 +57,15 @@ cd server && npx prisma studio
 - `(app)/` — additional authenticated screens
 - `(account)/` — account management screens (change email/password, upgrade, verify email)
 
-**Auth gate:** `app/_layout.tsx` wraps the app in `<SessionProvider>`. The session hook (`hooks/use-session.tsx`) listens to `supabase.auth.onAuthStateChange()` and drives redirects — no session → `/(auth)/login`, session → `/(tabs)`.
+**Auth gate:** `app/_layout.tsx` wraps the app in `<SessionProvider>`. The session hook (`hooks/use-session.tsx`) listens to `supabase.auth.onAuthStateChange()` and drives redirects — no session → `/(auth)/login`, session → `/(tabs)`. Before issuing the default post-signin redirect, the layout also checks `pendingReturnTo` (see below) and honours any stored deep-link destination.
 
 **Supabase client** is initialized in `lib/supabase.ts` using `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`.
 
 **Feature modules** live in `features/` (currently `auth/`) — keep business logic there, not in route files.
+
+**HTTP client:** `lib/api.ts` exposes a thin typed wrapper around `fetch`. Errors surface as an `ApiError` class carrying the HTTP `status` and parsed `body`, so route files can branch on status codes (e.g. `instanceof ApiError && err.status === 404`) without re-parsing messages.
+
+**Pending return-to:** `lib/pending-return-to.ts` persists a single deep-link destination on disk via `expo-file-system/legacy`. This survives the cold app restart triggered by email magic links. The signup screen writes it before kicking off auth; `app/_layout.tsx` reads + clears it on the post-signin redirect.
 
 ### Backend
 
