@@ -2,6 +2,23 @@ import { supabase } from './supabase';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
+/**
+ * Thrown by the `api.*` helpers when a request returns a non-2xx status.
+ * Screens can branch on `.status` to render state-specific UI (e.g. 404 →
+ * "Product not found") rather than matching on the message string.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(status: number, message: string, body: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return {};
@@ -21,7 +38,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.message ?? `Request failed with status ${res.status}`);
+    const message =
+      (body && typeof body === 'object' && 'message' in body && typeof (body as { message: unknown }).message === 'string'
+        ? (body as { message: string }).message
+        : null) ?? `Request failed with status ${res.status}`;
+    throw new ApiError(res.status, message, body);
   }
 
   return res.json() as Promise<T>;
