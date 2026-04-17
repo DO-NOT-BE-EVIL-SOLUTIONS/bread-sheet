@@ -140,3 +140,96 @@ describe('ProductScreen — product-not-found state', () => {
     await waitFor(() => expect(queryByTestId('product-not-found')).toBeNull());
   });
 });
+
+describe('ProductScreen — reviewer banner (P5-002)', () => {
+  beforeEach(() => {
+    mockRouter.push.mockClear();
+    mockApiGet.mockReset();
+  });
+
+  it('shows the "Needs review" banner for a registered non-submitter on a PENDING_REVIEW product', async () => {
+    mockUseSession.mockReturnValue({
+      session: { user: { id: 'reviewer', is_anonymous: false } },
+      isAnonymous: false,
+      isLoading: false,
+    });
+    mockApiGet.mockResolvedValue({
+      id: 'p1',
+      barcode: '0000000000001',
+      name: 'Mystery bread',
+      brand: 'Artisan',
+      image: null,
+      description: null,
+      unverified: true,
+      submittedByUserId: 'someone-else',
+    });
+    const { findByTestId } = render(<ProductScreen />);
+    const banner = await findByTestId('review-product-banner');
+    fireEvent.press(banner);
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/(app)/review-product/[barcode]',
+      params: { barcode: '0000000000001' },
+    });
+  });
+
+  it('hides the banner for the submitter of the product', async () => {
+    mockUseSession.mockReturnValue({
+      session: { user: { id: 'submitter', is_anonymous: false } },
+      isAnonymous: false,
+      isLoading: false,
+    });
+    mockApiGet.mockResolvedValue({
+      id: 'p1',
+      barcode: '0000000000001',
+      name: 'My bread',
+      brand: null,
+      image: null,
+      description: null,
+      unverified: true,
+      submittedByUserId: 'submitter',
+    });
+    const { findByText, queryByTestId } = render(<ProductScreen />);
+    await findByText('My bread');
+    expect(queryByTestId('review-product-banner')).toBeNull();
+  });
+
+  it('hides the banner for anonymous users', async () => {
+    mockUseSession.mockReturnValue({
+      session: { user: { id: 'guest', is_anonymous: true } },
+      isAnonymous: true,
+      isLoading: false,
+    });
+    mockApiGet.mockResolvedValue({
+      id: 'p1',
+      barcode: '0000000000001',
+      name: 'Mystery bread',
+      brand: null,
+      image: null,
+      description: null,
+      unverified: true,
+      submittedByUserId: 'someone-else',
+    });
+    const { findByText, queryByTestId } = render(<ProductScreen />);
+    await findByText('Mystery bread');
+    expect(queryByTestId('review-product-banner')).toBeNull();
+  });
+
+  it('hides the banner for a VERIFIED product (no unverified flag)', async () => {
+    mockUseSession.mockReturnValue({
+      session: { user: { id: 'reviewer', is_anonymous: false } },
+      isAnonymous: false,
+      isLoading: false,
+    });
+    mockApiGet.mockResolvedValue({
+      id: 'p1',
+      barcode: '0000000000001',
+      name: 'Sourdough',
+      brand: 'Artisan',
+      image: null,
+      description: null,
+    });
+    const { findByText, queryByTestId } = render(<ProductScreen />);
+    await findByText('Sourdough');
+    expect(queryByTestId('review-product-banner')).toBeNull();
+  });
+});

@@ -54,14 +54,22 @@ cd server && npx prisma studio
 **Routing:** Expo Router (file-based, like Next.js). Route groups:
 - `(auth)/` — unauthenticated screens (login, signup, guest)
 - `(tabs)/` — main app tab navigation (authenticated)
-- `(app)/` — additional authenticated screens
+- `(app)/` — additional authenticated screens (product detail, add-product flow, reviewer screen)
 - `(account)/` — account management screens (change email/password, upgrade, verify email)
+
+Authenticated `(app)` routes: `product/[barcode]`, `add-product`, `review-product/[barcode]`. New routes must be registered in `app/(app)/_layout.tsx`.
 
 **Auth gate:** `app/_layout.tsx` wraps the app in `<SessionProvider>`. The session hook (`hooks/use-session.tsx`) listens to `supabase.auth.onAuthStateChange()` and drives redirects — no session → `/(auth)/login`, session → `/(tabs)`. Before issuing the default post-signin redirect, the layout also checks `pendingReturnTo` (see below) and honours any stored deep-link destination.
 
 **Supabase client** is initialized in `lib/supabase.ts` using `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`.
 
-**Feature modules** live in `features/` (currently `auth/`) — keep business logic there, not in route files.
+**Feature modules** live in `features/`:
+- `auth/` — Supabase auth wrappers + validation helpers
+- `products/` — Add Product flow business logic (API helpers, on-device OCR wrapper, image picker + processing, shared constants/types). Screens import from here; see `docs/architecture/frontend.md#product-submission-ticket-p5-002`.
+
+Keep business logic in these modules — route files stay UI-only.
+
+**Native-optional dependencies** (`@react-native-ml-kit/text-recognition`, `expo-image-picker`, `expo-image-manipulator`) used by `features/products/` are loaded via guarded `require()`. Tests (jest-expo) pass without them; the runtime must install them for the full flow to work end-to-end.
 
 **HTTP client:** `lib/api.ts` exposes a thin typed wrapper around `fetch`. Errors surface as an `ApiError` class carrying the HTTP `status` and parsed `body`, so route files can branch on status codes (e.g. `instanceof ApiError && err.status === 404`) without re-parsing messages.
 

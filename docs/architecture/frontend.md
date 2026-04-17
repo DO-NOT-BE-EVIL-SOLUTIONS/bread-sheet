@@ -14,7 +14,8 @@ bread-sheet-app/
 │   ├── (app)/                   # Authenticated screens without the tab bar (product detail, add/edit product, review screens)
 │   └── (account)/               # Account management screens (change email/password, upgrade, verify)
 ├── features/                    # Business logic grouped by domain
-│   └── auth/                    # Auth actions and validation (no UI)
+│   ├── auth/                    # Auth actions and validation (no UI)
+│   └── products/                # Product submission flow — API helpers, OCR, image processing, types (no UI)
 ├── hooks/                       # React context and custom hooks
 ├── lib/                         # Third-party client singletons + small utilities (Supabase, API, pending-return-to)
 ├── components/                  # Shared UI components and design primitives
@@ -203,3 +204,29 @@ On web, confirmation dialogs use `window.confirm` (Alert.alert buttons are unsup
 - **Supabase is the single source of truth** for auth state — never manage session tokens manually in app code.
 - **`isAnonymous`** from `useSession()` is the canonical way to branch UI between guest and registered users — do not inspect `session.user` directly in screens.
 - **Email validation** is centralised in `features/auth/` — do not duplicate in screens.
+- **Native-optional modules** used by the product-submission flow (`@react-native-ml-kit/text-recognition`, `expo-image-picker`, `expo-image-manipulator`, `expo-file-system/legacy`) are loaded via guarded `require()` inside `features/products/`. This keeps jest-expo tests free of native shims and lets the UI gracefully fall back to manual entry if the runtime bundle doesn't ship the module.
+
+---
+
+## Product Submission (TICKET-P5-002)
+
+The multi-step Add Product flow is rooted at `app/(app)/add-product.tsx` with all business logic under `features/products/`:
+
+| File | Responsibility |
+|------|---------------|
+| `constants.ts` | `MIN_OCR_LENGTH`, image size caps, JPEG quality targets — must match the backend contract defined in P5-003 |
+| `types.ts` | `ProductSubmission`, `ExtractedLabel`, `ProductDetail` — shared wire types |
+| `api.ts` | `submitProduct`, `uploadProductImage`, `extractLabelFromText`, `extractLabelFromImage`, `approveProduct`, `retractVerification` |
+| `ocr.ts` | `recogniseLabelText` — thin wrapper over `@react-native-ml-kit/text-recognition`, returns `{rawText, unavailable}` |
+| `image-picker.ts` | `captureImage` — camera or library, returns the raw URI |
+| `image-processing.ts` | `processCaptureForUpload` — runs `expo-image-manipulator` to resize/recompress, enforces the 5 MB client cap via `ImageTooLargeError` |
+| `extract.ts` | `extractFromLabelImage` — orchestrates OCR-then-backend: text path when OCR text ≥ `MIN_OCR_LENGTH`, image fallback otherwise, never throws |
+
+### Reviewer flow
+
+`app/(app)/review-product/[barcode].tsx` is the reviewer screen for peer approval. It's surfaced from the product detail screen via a "Needs review" banner that is shown when:
+- the product response carries `unverified: true`
+- the caller is registered (not anonymous)
+- the caller is not the submitter (`submittedByUserId !== session.user.id`)
+
+The reviewer screen renders every submitted field — including `null` values, shown as "Not provided" — so the reviewer can judge completeness. "Looks correct" calls `POST /api/products/:barcode/verify`; "Something looks wrong" calls `DELETE /api/products/:barcode/verify` (reused as the "no" vote channel).
