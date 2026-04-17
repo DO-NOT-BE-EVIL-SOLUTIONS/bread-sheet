@@ -29,6 +29,10 @@ interface Product {
   brand: string | null;
   image: string | null;
   description: string | null;
+  /** Present when the product is awaiting peer review (P5-002). */
+  unverified?: boolean;
+  /** Supabase user id of the submitter, when the product was user-contributed. */
+  submittedByUserId?: string | null;
 }
 
 // ─── Taste Score Colour ───────────────────────────────────────────────────────
@@ -306,7 +310,8 @@ export default function ProductScreen() {
   const router = useRouter();
 
   const { addRecentProduct } = useRecentProducts();
-  const { isAnonymous } = useSession();
+  const { isAnonymous, session } = useSession();
+  const userId = session?.user.id ?? null;
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -458,6 +463,32 @@ export default function ProductScreen() {
           <Text style={styles.placeholderIcon}>🍞</Text>
         </View>
       )}
+
+      {/*
+        Reviewer banner (P5-002). Shown to registered, non-submitter users
+        when the product is in PENDING_REVIEW. Tapping opens the reviewer
+        screen where the user can approve or reject the submission.
+      */}
+      {product?.unverified && !isAnonymous && product.submittedByUserId !== userId ? (
+        <TouchableOpacity
+          testID="review-product-banner"
+          style={[styles.reviewBanner, { backgroundColor: colors.tint + '22', borderColor: colors.tint }]}
+          onPress={() =>
+            router.push({
+              pathname: '/(app)/review-product/[barcode]',
+              params: { barcode },
+            })
+          }
+        >
+          <Text style={styles.reviewBannerIcon}>🔎</Text>
+          <View style={styles.reviewBannerBody}>
+            <ThemedText style={styles.reviewBannerTitle}>Needs review</ThemedText>
+            <ThemedText style={styles.reviewBannerText}>
+              This product was added by a user — does it look correct?
+            </ThemedText>
+          </View>
+        </TouchableOpacity>
+      ) : null}
 
       <View style={styles.infoSection}>
         <ThemedText type="title" style={styles.productName}>{product?.name}</ThemedText>
@@ -633,5 +664,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.6,
     marginTop: 8,
+  },
+  reviewBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  reviewBannerIcon: {
+    fontSize: 22,
+  },
+  reviewBannerBody: {
+    flex: 1,
+  },
+  reviewBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  reviewBannerText: {
+    fontSize: 13,
+    opacity: 0.8,
+    marginTop: 2,
+    lineHeight: 18,
   },
 });

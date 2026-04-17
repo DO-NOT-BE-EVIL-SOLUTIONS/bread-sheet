@@ -176,19 +176,26 @@ User History
 - Run manipulation after capture/selection, before showing the preview — the preview should already display the processed version.
 - If the processed file still exceeds **5 MB**, show an inline error ("Photo is too large — please try again in better lighting or closer to the subject") and block the upload.
 **Acceptance Criteria:**
-- [ ] User can photograph the product and the nutritional label from within the screen.
-- [ ] On-device OCR runs locally after the label photo is captured (no network request at this stage).
-- [ ] If OCR text is sufficient, only the raw text (not the image) is sent to the backend.
-- [ ] If OCR text is insufficient, the label image is sent as a fallback for backend vision inference.
-- [ ] All images are resized and compressed client-side before upload using `expo-image-manipulator`.
-- [ ] Images exceeding 5 MB after compression show an inline error and are not uploaded.
-- [ ] All three fill modes work correctly (manual, pre-fill+edit, accept-all).
-- [ ] Required-field validation prevents submission of incomplete data.
-- [ ] Product display photo uploads to S3; URL is included in the submission payload.
-- [ ] On successful submission, the user is navigated to the product screen showing the PENDING_REVIEW state and a confirmation toast.
-- [ ] A `422` response displays the AI rejection reason inline on the form; the user can correct the data and resubmit.
-- [ ] Registered users who scan a `PENDING_REVIEW` product see a reviewer banner and can cast an approval or rejection.
-- [ ] The submitter of a product does not see the reviewer banner for their own submission.
+- [x] User can photograph the product and the nutritional label from within the screen. *(client skeleton — uses `expo-image-picker` with camera + library fallback)*
+- [x] On-device OCR runs locally after the label photo is captured (no network request at this stage). *(client skeleton — `features/products/ocr.ts` gracefully degrades when the native module isn't installed)*
+- [x] If OCR text is sufficient, only the raw text (not the image) is sent to the backend.
+- [x] If OCR text is insufficient, the label image is sent as a fallback for backend vision inference.
+- [x] All images are resized and compressed client-side before upload using `expo-image-manipulator`.
+- [x] Images exceeding 5 MB after compression show an inline error and are not uploaded.
+- [x] All three fill modes work correctly (manual, pre-fill+edit, accept-all).
+- [x] Required-field validation prevents submission of incomplete data.
+- [ ] Product display photo uploads to S3; URL is included in the submission payload. *(client sends to `POST /api/products/upload-image`; backend endpoint pending P5-003)*
+- [ ] On successful submission, the user is navigated to the product screen showing the PENDING_REVIEW state and a confirmation toast. *(client navigates; backend `POST /api/products` pending P5-003)*
+- [x] A `422` response displays the AI rejection reason inline on the form; the user can correct the data and resubmit. *(client handles 422 — server-side plausibility checks pending P5-003)*
+- [x] Registered users who scan a `PENDING_REVIEW` product see a reviewer banner and can cast an approval or rejection. *(banner + `app/(app)/review-product/[barcode].tsx` shipped; depends on `unverified` + `submittedByUserId` in GET response — pending P5-003)*
+- [x] The submitter of a product does not see the reviewer banner for their own submission.
+
+**Implementation status (client skeleton, 2026-04-17):**
+- Client-side multi-step flow and reviewer screen are shipped in `bread-sheet-app/app/(app)/add-product.tsx` and `app/(app)/review-product/[barcode].tsx`.
+- Business logic lives in `features/products/` (`api.ts`, `extract.ts`, `ocr.ts`, `image-picker.ts`, `image-processing.ts`, `constants.ts`, `types.ts`) — screens stay UI-only per the `features/` convention.
+- `MIN_OCR_LENGTH = 50` is exported from `features/products/constants.ts`; the backend (P5-003) must reference the same value.
+- Native modules (`@react-native-ml-kit/text-recognition`, `expo-image-picker`, `expo-image-manipulator`) are consumed via guarded `require()` so jest-expo tests pass without them. The user must install them and rebuild the native client before the full flow works end-to-end.
+- Backend endpoints (`POST /api/products`, `POST /api/products/extract-label`, `POST /api/products/upload-image`, `POST /api/products/:barcode/verify`, `DELETE /api/products/:barcode/verify`) are stubbed only from the client side — P5-003 is still fully open.
 
 ### [TICKET-P5-003] Backend: Label Extraction, Submission, & Peer Verification
 **Goal:** Provide three backend capabilities: (1) structure nutritional data from on-device OCR text (primary) or a label image (fallback); (2) validate and normalise incoming images server-side; (3) accept product submissions from registered users and gate promotion to `VERIFIED` behind peer review by a second registered user.

@@ -6,7 +6,7 @@
 
 * **Rate by Taste:** Simple, intuitive interface to rate food based on taste (0–10, 0.5-step precision).
 * **Scan & Discover:** Integrated barcode scanner (EAN/UPC) to instantly find products or fetch metadata via Open Food Facts.
-* **Add Products:** Crowdsource the database by adding new items if they don't exist.
+* **Add Products:** Crowdsource the database with a camera-assisted flow — capture the product and nutritional label, let on-device OCR pre-fill the details, then submit for peer review.
 * **Social Groups:** Create groups (e.g., "Office Snacks", "Family Dinners") to share ratings and recommendations specifically with them.
 * **History:** Keep a personal log of everything you've tasted.
 
@@ -68,6 +68,13 @@ In IntelliJ / WebStorm you can open a WSL2 terminal directly:
     cd bread-sheet-app
     npm install
     ```
+
+    For the Add Product flow (TICKET-P5-002) you'll additionally need:
+    ```bash
+    npx expo install expo-image-picker expo-image-manipulator
+    npm install @react-native-ml-kit/text-recognition
+    ```
+    These native dependencies are loaded via guarded `require()` in `features/products/`, so tests and the sign-up/sign-in flows work without them — but the camera capture, on-device OCR, and image processing won't run until they're installed and the native client is rebuilt (Expo Go is not sufficient; use a dev build).
 
 3. **Install Server Dependencies**
 
