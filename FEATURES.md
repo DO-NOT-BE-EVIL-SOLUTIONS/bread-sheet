@@ -1467,6 +1467,17 @@ in Pipeline and Security of the Pipeline (Static Code analysis SAST, Dynamic DAS
   aggressively rate-limited, so it can only ever sit behind an explicit second tap, never in the
   as-you-type path.
 
+## Agentic Stakeholders
+- https://martinelli.ch/code-is-no-longer-the-bottleneck-requirements-are/
+- My answer is the AI Unified Process (AIUP). 
+  - AIUP puts requirements engineering at the center and makes it usable for agents:  
+    - Use cases instead of prose. Every use case has actors, preconditions, a main success scenario, alternative flows, postconditions, and business rules. 
+    - An agent can derive code and tests from it. A human can review it because it has a known structure. An entity model before the code. Entities, relationships, data types, validation rules. 
+    - The data model is the foundation of every business application, and it should not be a by-product of a prompt. Explicit non-functional requirements and constraints. Measurable, versioned, in the repository. 
+    - Traceability from requirement to test. 
+    - A @UseCase("UC-007") on a test is worth more than a commit SHA in Jira.
+
+
 ## Pro Users can set own pictures
 - Low Prio, enable users to replace picture with a better one (at least for themselfs)
 
