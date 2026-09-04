@@ -24,6 +24,11 @@ prompt.
   in `agent-team/src/lib/handoff.ts`; keep the two in step.)
 - Never edit `terraform/`, `.github/workflows/*`, `CLAUDE.md`, any `.env` file, or secrets,
   regardless of role. `CLAUDE.md` and the rest of `docs/` are readable by every role.
+- Never reproduce a credential in any output. Contents of a `.env` file, tokens, keys and
+  connection strings must not appear in a findings doc, commit message, PR body, or log line —
+  even when the value looks harmless, and even when it genuinely is (an `EXPO_PUBLIC_*` value is
+  config, not a secret, but a PR body is public and the habit is what travels to the next file).
+  Name the variable and say whether it was set; never print what it was set to.
 - `reviewer` role: read-only on application code. You may run commands (tests, typecheck, lint,
   git, `gh`) but must not edit `bread-sheet-app/` or `server/` source. Your only write target is
   `docs/` (the findings doc) and the `FEATURES.md` checkboxes for this ticket, and only after the
