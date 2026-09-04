@@ -52,6 +52,8 @@
     ```
 * A free [Supabase](https://supabase.com) project (for auth)
 * For the mobile app: the **Expo Go** app on a physical device, or an emulator
+* *Only for the native E2E suite (`npm run test:maestro`):* **JDK 17+**, an **Android SDK**,
+  and the [Maestro](https://maestro.mobile.dev) CLI — see [Native E2E](#native-e2e-camera--barcode-scan)
 
 ### 1. Clone the repository
 
@@ -146,6 +148,35 @@ Run the app's E2E tests (Playwright, against Expo web — see [Agentic Dev Team]
 cd bread-sheet-app && npx playwright install chromium   # one-time
 npm run test:e2e
 ```
+
+#### Native E2E (camera & barcode scan)
+
+Playwright drives Expo web, which has no camera — the scan flows are covered instead by
+[Maestro](https://maestro.mobile.dev) against a debug build on a headless Android emulator:
+
+```sh
+cd bread-sheet-app
+curl -Ls "https://get.maestro.mobile.dev" | bash   # one-time, installs to ~/.maestro
+MAESTRO_PREREQS_ONLY=1 npm run test:maestro        # one-second machine check
+npm run test:maestro
+```
+
+`test:maestro` is self-provisioning: it resolves the Android SDK and JDK, reuses or creates an
+AVD, boots the emulator headless, builds and installs the debug APK, starts Metro, runs the flows
+in `e2e/maestro/`, and tears everything down. Each missing prerequisite exits with an actionable
+message instead of a confusing downstream crash — which is what `MAESTRO_PREREQS_ONLY=1` reports
+in a second rather than mid-build.
+
+Beyond the Playwright suite's requirements you need **JDK 17+** (the Android Studio JBR counts)
+and an **Android SDK** with `emulator/` and `platform-tools/`, found via `ANDROID_HOME` or a
+standard location such as `~/Android/Sdk`. `cmdline-tools` is needed only to *create* an AVD; an
+existing one is discovered without it. The flows sign in as a guest and look up a product, so —
+exactly like the Playwright specs — they need `bread-sheet-app/.env` to point at a reachable
+Supabase project. **Budget 10–40 minutes for the first run:** the initial `expo prebuild` +
+Gradle build downloads the Android toolchain. Later runs are far quicker.
+
+See [`docs/architecture/frontend.md`](docs/architecture/frontend.md) for how the suite is built
+and the full set of `MAESTRO_*` overrides.
 
 ## Optional / Advanced Setup
 
