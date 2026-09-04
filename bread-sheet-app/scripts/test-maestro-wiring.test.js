@@ -173,4 +173,42 @@ describe('runner regressions (TICKET-P9-003)', () => {
     expect(RUNNER_SRC).toMatch(/function fail\([^)]*\)\s*\{\s*throw new RunnerError/);
     expect(RUNNER_SRC).toMatch(/\}\s*finally\s*\{\s*\n\s*teardown\(/);
   });
+
+  // TICKET-P9-003 — credentials may come from the process environment, so a machine
+  // running the agent dev team never has to park a credentials file in a worktree
+  // agents can read. Half-set is an error, not a silent mix with the file.
+  describe('Supabase credential resolution', () => {
+    const KEYS = runner.REQUIRED_APP_ENV;
+    let saved;
+
+    beforeEach(() => {
+      saved = KEYS.map((k) => process.env[k]);
+      KEYS.forEach((k) => delete process.env[k]);
+      delete process.env.MAESTRO_SKIP_ENV_CHECK;
+    });
+
+    afterEach(() => {
+      KEYS.forEach((k, i) => {
+        if (saved[i] === undefined) delete process.env[k];
+        else process.env[k] = saved[i];
+      });
+    });
+
+    test('both exported is accepted without touching the filesystem', () => {
+      KEYS.forEach((k) => { process.env[k] = 'exported-value'; });
+      expect(() => runner.ensureAppCredentials()).not.toThrow();
+    });
+
+    test('exporting only one is a hard error naming the missing key', () => {
+      process.env[KEYS[0]] = 'exported-value';
+      expect(() => runner.ensureAppCredentials()).toThrow(new RegExp(KEYS[1]));
+    });
+
+    test('the bypass flag still short-circuits the whole check', () => {
+      process.env.MAESTRO_SKIP_ENV_CHECK = '1';
+      expect(() => runner.ensureAppCredentials()).not.toThrow();
+      delete process.env.MAESTRO_SKIP_ENV_CHECK;
+    });
+  });
+
 });
