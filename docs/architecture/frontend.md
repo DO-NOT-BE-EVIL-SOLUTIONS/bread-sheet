@@ -504,7 +504,16 @@ is awaited, adb state calls follow the install, children are spawned onto a real
 file descriptor rather than a not-yet-open `WriteStream`).
 
 **Prerequisites** are the same as `npm run test:e2e`: a reachable Supabase project
-via `bread-sheet-app/.env` (guest sign-in + product lookup). Plus JDK 17+, an
+for guest sign-in + product lookup, supplied **either** by exporting
+`EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY` in the
+environment **or** via `bread-sheet-app/.env`, checked in that order. The
+environment route is there so a machine running the agentic dev team never has to
+park a credentials file inside a worktree agents can read — these two values are
+config rather than secrets (`EXPO_PUBLIC_*` is inlined into the client bundle,
+which is why CI passes them as repo *variables*), but the same worktree habit
+applied to `server/.env` would be handing over `GEMINI_API_KEY`. Metro inherits the
+runner's environment, so exported values need no further plumbing. Exporting only
+one of the two is a hard error rather than a silent mix with the file. Plus JDK 17+, an
 Android SDK with a system image and an AVD, and the Maestro CLI; the first Gradle
 run downloads dependencies and can take 10–40 minutes. AVDs are discovered with
 `emulator -list-avds`, which every SDK has — *not* `avdmanager list avd`, which

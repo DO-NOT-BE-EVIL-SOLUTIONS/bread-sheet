@@ -170,9 +170,19 @@ in a second rather than mid-build.
 Beyond the Playwright suite's requirements you need **JDK 17+** (the Android Studio JBR counts)
 and an **Android SDK** with `emulator/` and `platform-tools/`, found via `ANDROID_HOME` or a
 standard location such as `~/Android/Sdk`. `cmdline-tools` is needed only to *create* an AVD; an
-existing one is discovered without it. The flows sign in as a guest and look up a product, so —
-exactly like the Playwright specs — they need `bread-sheet-app/.env` to point at a reachable
-Supabase project. **Budget 10–40 minutes for the first run:** the initial `expo prebuild` +
+existing one is discovered without it. The flows sign in as a guest and look up a product, so
+they need Supabase config. Prefer exporting it in your shell — nothing is then written into the
+working tree:
+
+```sh
+export EXPO_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+export EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=<publishable-key>
+```
+
+The runner also accepts `bread-sheet-app/.env` (what the Playwright specs use) if you'd rather
+keep a file. Export both variables or neither — half-set is rejected outright, because it would
+otherwise mix with the file and fail much later inside a flow. A dedicated throwaway Supabase
+project is the sensible choice here, as it is for CI. **Budget 10–40 minutes for the first run:** the initial `expo prebuild` +
 Gradle build downloads the Android toolchain. Later runs are far quicker.
 
 See [`docs/architecture/frontend.md`](docs/architecture/frontend.md) for how the suite is built

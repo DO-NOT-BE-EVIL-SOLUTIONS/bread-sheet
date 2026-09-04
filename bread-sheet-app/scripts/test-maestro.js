@@ -255,26 +255,68 @@ function resolveMaestro() {
   return envMaestro;
 }
 
-function ensureEnvFile() {
+/**
+ * The two values the flows need: they sign in as a guest and look up a product, so
+ * the app must reach a Supabase project — the same prerequisite as `npm run test:e2e`.
+ */
+const REQUIRED_APP_ENV = ['EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'];
+
+/**
+ * Accepts the credentials from the **process environment** or from `bread-sheet-app/.env`,
+ * in that order.
+ *
+ * The environment route exists so a machine that runs the agentic dev team never has to
+ * park a credentials file inside a worktree agents can read. These two particular values
+ * are config rather than secrets — `EXPO_PUBLIC_*` is inlined into the client bundle, which
+ * is why CI passes them as repo *variables* and not secrets (.github/workflows/test.yml) —
+ * but the habit is what matters: the same worktree pattern applied to `server/.env` would be
+ * handing over GEMINI_API_KEY and DATABASE_URL. Metro inherits this process's environment
+ * (startMetro spawns without an `env` override), so exported vars reach the bundler with no
+ * further plumbing.
+ *
+ * Half-configured is an error rather than a silent mix: with one var exported and the other
+ * only in `.env`, the app still boots and the failure surfaces much later as an unexplained
+ * auth error inside a flow.
+ */
+function ensureAppCredentials() {
   if (process.env.MAESTRO_SKIP_ENV_CHECK === '1') return;
+
+  const fromEnv = REQUIRED_APP_ENV.filter((key) => (process.env[key] || '').trim() !== '');
+
+  if (fromEnv.length === REQUIRED_APP_ENV.length) {
+    log('Supabase credentials: from the process environment (no .env file needed)');
+    return;
+  }
+  if (fromEnv.length > 0) {
+    const missing = REQUIRED_APP_ENV.filter((key) => !fromEnv.includes(key));
+    fail(
+      `Only part of the Supabase config is exported: ${fromEnv.join(', ')} set, ` +
+        `${missing.join(', ')} missing. Export both or neither — a half-set environment ` +
+        'silently mixes with bread-sheet-app/.env and fails later, inside a flow.'
+    );
+  }
+
   if (!fs.existsSync(ENV_FILE)) {
     fail(
-      'bread-sheet-app/.env is missing — the flows sign in as guest and look up a ' +
-        'product, so they need a reachable Supabase project (same prerequisite as ' +
-        '`npm run test:e2e`). Copy .env.example → .env and fill in ' +
-        'EXPO_PUBLIC_SUPABASE_URL + EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY. ' +
+      'No Supabase config. The flows sign in as guest and look up a product, so they need a ' +
+        'reachable Supabase project (same prerequisite as `npm run test:e2e`). Either export\n' +
+        `  ${REQUIRED_APP_ENV.join(' and ')}\n` +
+        'in your shell (preferred — nothing is written into the worktree), or copy ' +
+        'bread-sheet-app/.env.example → .env and fill them in. ' +
         '(Set MAESTRO_SKIP_ENV_CHECK=1 to bypass.)'
     );
   }
-  const env = fs.readFileSync(ENV_FILE, 'utf8');
-  for (const key of ['EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY']) {
-    if (!new RegExp(`^${key}=`, 'm').test(env)) {
+
+  const contents = fs.readFileSync(ENV_FILE, 'utf8');
+  for (const key of REQUIRED_APP_ENV) {
+    if (!new RegExp(`^${key}=`, 'm').test(contents)) {
       fail(
-        `${key} is missing from bread-sheet-app/.env — guest sign-in and product ` +
-          'lookup need it (same prerequisite as `npm run test:e2e`).'
+        `${key} is missing from bread-sheet-app/.env and is not exported — guest sign-in and ` +
+          'product lookup need it (same prerequisite as `npm run test:e2e`).'
       );
     }
   }
+  log('Supabase credentials: from bread-sheet-app/.env');
 }
 
 // ─── AVD provisioning (acceptance criteria: no per-run manual setup) ──────────
@@ -641,7 +683,7 @@ async function main() {
   // Every prerequisite is resolved BEFORE anything slow or stateful starts —
   // including Maestro itself, which used to be looked up after the Gradle build
   // and so reported "not installed" 10–40 minutes into a run.
-  ensureEnvFile();
+  ensureAppCredentials();
   const sdk = resolveAndroidSdk();
   const java = resolveJava();
   log(`Android SDK: ${sdk}`);
@@ -762,9 +804,11 @@ if (require.main === module) {
   // See scripts/test-maestro-wiring.test.js.
   module.exports = {
     RunnerError,
+    REQUIRED_APP_ENV,
     adb,
     bootEmulator,
     buildAndInstallDebug,
+    ensureAppCredentials,
     javaMajorVersion,
     listDeviceSerials,
     listExistingAvds,
