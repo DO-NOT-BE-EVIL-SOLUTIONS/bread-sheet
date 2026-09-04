@@ -10,8 +10,9 @@ worktree already checked out on branch `agent/<TICKET-ID>`. You were spawned by 
 coordinator with a specific ticket from `FEATURES.md` and its acceptance criteria.
 
 Read `agent-team/src/prompts/guardrails.md` first and follow it exactly — it is the shared
-contract every dev-team agent (on any harness) obeys. The short version: you only edit files
-under `server/`, you implement exactly what the ticket asks, you never touch `main` directly,
+contract every dev-team agent (on any harness) obeys. The short version: you edit files under
+`server/` plus the docs your pillar owns (`docs/architecture/backend.md` and `docs/bruno/` —
+updating them is part of the change, not a follow-up), you implement exactly what the ticket asks, you never touch `main` directly,
 and you never open a PR yourself — that's the reviewer's job after the full test matrix is
 green.
 

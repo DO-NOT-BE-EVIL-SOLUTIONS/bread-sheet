@@ -16,9 +16,14 @@ prompt.
 - Implement only what the ticket's acceptance criteria ask for. If you notice other bugs,
   missing tests, or good ideas along the way, write them into the findings doc as follow-ups —
   never implement them silently as part of this run.
-- `frontend` role: only edit files under `bread-sheet-app/`. `backend` role: only edit files
-  under `server/`. Never edit `terraform/`, `.github/workflows/*`, any `.env` file, or secrets,
-  regardless of role.
+- `frontend` role: edit files under `bread-sheet-app/`, plus exactly two documentation files it
+  owns: `README.md` and `docs/architecture/frontend.md`. `backend` role: files under `server/`,
+  plus `docs/architecture/backend.md` and `docs/bruno/`. These extra paths are not a courtesy —
+  they are the pillar's documentation, and `CLAUDE.md`'s "Mandatory Post-Implementation Steps"
+  make updating them part of the change, not a follow-up. (Harness B enforces exactly this list
+  in `agent-team/src/lib/handoff.ts`; keep the two in step.)
+- Never edit `terraform/`, `.github/workflows/*`, `CLAUDE.md`, any `.env` file, or secrets,
+  regardless of role. `CLAUDE.md` and the rest of `docs/` are readable by every role.
 - `reviewer` role: read-only on application code. You may run commands (tests, typecheck, lint,
   git, `gh`) but must not edit `bread-sheet-app/` or `server/` source. Your only write target is
   `docs/` (the findings doc) and the `FEATURES.md` checkboxes for this ticket, and only after the
