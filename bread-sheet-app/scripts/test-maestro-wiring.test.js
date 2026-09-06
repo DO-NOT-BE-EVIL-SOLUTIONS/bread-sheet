@@ -241,4 +241,25 @@ describe('runner regressions (TICKET-P9-003)', () => {
     });
   });
 
+
+  // TICKET-P9-003 — a distro can have several JDKs with `default` pointing at the newest,
+  // which is the one AGP cannot use. Probing only JAVA_HOME/PATH/JBR made an installed,
+  // in-range JDK invisible and told the user to install one they already had.
+  describe('system JDK discovery', () => {
+    test('finds every java under the given roots, and tolerates absent roots', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jvms-'));
+      for (const name of ['java-21-openjdk', 'java-26-openjdk']) {
+        fs.mkdirSync(path.join(root, name, 'bin'), { recursive: true });
+        fs.writeFileSync(path.join(root, name, 'bin', 'java'), '');
+      }
+      fs.mkdirSync(path.join(root, 'not-a-jdk'), { recursive: true });
+
+      const found = runner.systemJavaCandidates([root, '/definitely/not/here']);
+      expect(found).toEqual([
+        path.join(root, 'java-21-openjdk', 'bin', 'java'),
+        path.join(root, 'java-26-openjdk', 'bin', 'java'),
+      ]);
+    });
+  });
+
 });

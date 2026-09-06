@@ -203,10 +203,35 @@ function isUsableJavaMajor(major) {
   return Number.isInteger(major) && major >= MIN_JAVA_MAJOR && major <= MAX_JAVA_MAJOR;
 }
 
+/**
+ * Every `java` under the distro's JVM directory, newest-looking last so the probe order
+ * stays stable. Needed because a rolling-release distro commonly has several JDKs installed
+ * with `default` pointing at the newest — which is exactly the one AGP cannot use. Without
+ * this, an in-range JDK sitting right there in /usr/lib/jvm is invisible and the run dies
+ * telling the user to install a JDK they already have.
+ */
+function systemJavaCandidates(roots = ['/usr/lib/jvm', '/usr/lib64/jvm', path.join(os.homedir(), '.jdks')]) {
+  const found = [];
+  for (const root of roots) {
+    let entries;
+    try {
+      entries = fs.readdirSync(root);
+    } catch {
+      continue; // root absent — normal on macOS and minimal images
+    }
+    for (const entry of entries.sort()) {
+      const java = path.join(root, entry, 'bin', 'java');
+      if (fs.existsSync(java)) found.push(java);
+    }
+  }
+  return found;
+}
+
 function resolveJava() {
   const candidates = [
     process.env.JAVA_HOME && path.join(process.env.JAVA_HOME, 'bin', 'java'),
     'java', // relies on PATH
+    ...systemJavaCandidates(),
     '/opt/android-studio/jbr/bin/java',
     path.join(os.homedir(), 'android-studio', 'jbr', 'bin', 'java'),
     '/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java',
@@ -836,5 +861,6 @@ if (require.main === module) {
     MIN_JAVA_MAJOR,
     MAX_JAVA_MAJOR,
     isUsableJavaMajor,
+    systemJavaCandidates,
   };
 }
