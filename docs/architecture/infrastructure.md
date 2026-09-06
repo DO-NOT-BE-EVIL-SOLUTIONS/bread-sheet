@@ -502,3 +502,47 @@ keeps the brief two-task rolling-deploy overlap safe — no separate migration J
 - Lambda source and configuration will live in `terraform/` alongside other infra (resize Lambda is a
   deferred post-build adaptation).
 - The **container registry is external**: the server image lives in GitHub Container Registry, not AWS.
+
+## Dependency Hygiene
+
+Dependabot is configured in [`.github/dependabot.yml`](../../.github/dependabot.yml) with a weekly
+schedule for **four** manifests: `/bread-sheet-app`, `/server`, `/agent-team` and `/terraform`.
+`/agent-team` was added late — note that Dependabot *security* updates run against every manifest it
+detects regardless of this file, but *version* updates only run for the directories listed here, so a
+missing entry produces a directory that looks covered (security PRs arrive) while silently drifting
+behind on routine releases.
+
+Merging is gated by a repo **ruleset on `main` requiring 1 approving review**, so Dependabot PRs need
+a human approval even when every check is green.
+
+Routine remediation is a **two-pass** `npm audit fix --package-lock-only` in each of the three npm
+projects. Two passes are required: the first leaves nested duplicate copies (e.g. `brace-expansion`
+under `glob/`, `@expo/fingerprint/` and `@typescript-eslint/`) at the vulnerable version, and the
+second collapses them.
+
+### Accepted, un-remediable advisories
+
+Two findings survive `npm audit fix` and are accepted rather than force-fixed. In both cases npm's
+suggested "fix" is a **major downgrade**, which would cost more than the advisory does.
+
+- **`mysql2` (high, `server/`).** `prisma` pins `mysql2` to an exact version, so npm's only offer was
+  `prisma@6.19.3` — a major downgrade from 7.x. Resolved instead with an `overrides` entry in
+  `server/package.json` pinning `mysql2` to a patched release. This is safe because the package is
+  never loaded: BreadSheet is Postgres-only (`@prisma/adapter-pg`) and `mysql2` reaches the tree only
+  as part of Prisma's multi-driver bundle. Verified after the override with `prisma validate`,
+  `prisma generate` and the full server suite.
+- **`deepmerge-ts` (high, `server/`).** Reaches the tree via `prisma → @prisma/config`. The patched
+  release is a major (`8.x`) that `@prisma/config` does not declare support for, and the Prisma CLI
+  runs on the deploy path (`scripts/start.sh` → `npm run db:deploy`), so an override here risks a
+  deploy-time outage to fix a stack-exhaustion bug whose only input is our own `prisma.config.ts`.
+  Left for Prisma to bump upstream.
+- **`image-size` (high, `bread-sheet-app/`).** No patched release exists at all — the advisory range
+  is `*`. Transitive via metro, i.e. build tooling; it is not in the shipped app bundle.
+
+### `allowScripts` pins exact versions
+
+`server/package.json` carries an `allowScripts` allowlist keyed by `name@exact-version`. **Bumping any
+of those packages invalidates its entry**, and npm then silently blocks the install script rather than
+failing. For `prisma`/`@prisma/engines` that means the engine postinstall stops running, which breaks
+`prisma generate` and the Docker build. After any dependency bump, check `npm install` output for
+`npm warn install-scripts` and refresh the pinned versions to match.

@@ -67,10 +67,13 @@
   },
   "allowScripts": {
     "@google/genai@2.10.0": true,
-    "@prisma/engines@7.8.0": true,
+    "@prisma/engines@7.10.0": true,
     "esbuild@0.28.1": true,
-    "prisma@7.8.0": true,
-    "protobufjs@7.6.4": true,
-    "sharp@0.35.2": true
+    "prisma@7.10.0": true,
+    "protobufjs@7.6.6": true,
+    "sharp@0.35.3": true
+  },
+  "overrides": {
+    "mysql2": "^3.24.3"
   }
 }
