@@ -10,7 +10,7 @@
 #
 # Prereqs (enforced by scripts/test-maestro.js): a booted emulator with the
 # debug APK installed and CAMERA pre-granted, Metro on :8081 (adb-reversed),
-# and a reachable Supabase project via bread-sheet-app/.env — guest sign-in
+# and Supabase config (exported in the environment, or bread-sheet-app/.env) — guest sign-in
 # plus product lookup, the same requirement as the Playwright specs.
 appId: com.breadsheetexpo.breadsheet
 ---
@@ -58,4 +58,7 @@ appId: com.breadsheetexpo.breadsheet
 # Belt and braces: the scan tab's camera UI is gone, so we really navigated.
 - assertNotVisible:
     id: ".*scan-torch.*"
-- takeScreenshot: e2e/maestro/artifacts/barcode-scan
+# Maestro resolves this inside its own per-run output directory
+# (~/.maestro/tests/<run>/barcode-scan/takeScreenshot/), NOT the repo — a repo-relative
+# path here just recreates that tree in there. Bare name on purpose.
+- takeScreenshot: barcode-scan

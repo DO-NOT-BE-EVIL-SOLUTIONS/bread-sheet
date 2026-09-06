@@ -57,6 +57,10 @@ const FLOWS_DIR = path.join(ROOT, 'e2e', 'maestro');
 const ARTIFACTS_DIR = path.join(FLOWS_DIR, 'artifacts');
 const ENV_FILE = path.join(ROOT, '.env');
 const ANDROID_DIR = path.join(ROOT, 'android');
+const DEBUG_APK = path.join(ANDROID_DIR, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+// Records the app.json/package.json fingerprint android/ was generated from. Lives inside
+// android/, which is gitignored, so it is regenerated with the project it describes.
+const PREBUILD_STAMP = path.join(ANDROID_DIR, '.breadsheet-prebuild');
 
 function log(...args) {
   console.log('[test:maestro]', ...args);
@@ -393,15 +397,45 @@ function findSdkmanager(sdk) {
 }
 
 /** Installed x86_64 google_apis system images, newest API first. */
+/**
+ * Flavours we will boot, and the ones we refuse.
+ *
+ * Play-Store images are excluded deliberately, not overlooked: on
+ * `android-37.1;google_apis_playstore_ps16k` Maestro's `inputText` hangs indefinitely —
+ * measured at a 2m59s timeout with no error, while the identical flow passes in seconds on
+ * `android-35;google_apis`. Play images are locked down in ways that break the IME
+ * manipulation text entry depends on, so an emulator built from one cannot run this suite.
+ *
+ * This pairs with the API-directory match below: the two must be changed together. Widening
+ * the match to accept a dotted API (`android-37.1`) *without* this exclusion would make a
+ * Play-Store image selectable and walk straight back into that hang.
+ */
+const USABLE_IMAGE_FLAVORS = ['google_apis', 'default'];
+const REJECTED_IMAGE_FLAVOR = /playstore/;
+
+/** Installed x86_64 system images this suite can actually use, newest API first. */
 function installedSystemImages(sdk) {
   const root = path.join(sdk, 'system-images');
   if (!fs.existsSync(root)) return [];
   const found = [];
   for (const apiDir of fs.readdirSync(root)) {
-    const match = /^android-(\d+)$/.exec(apiDir);
+    // `android-35`, and also `android-37.1` — a dotted API directory is real (the
+    // extension-level images use it) and the previous `\d+`-only match skipped it silently.
+    const match = /^android-(\d+)(?:\.(\d+))?$/.exec(apiDir);
     if (!match) continue;
-    const api = Number(match[1]);
-    for (const flavor of ['google_apis', 'default', 'google_apis_playstore']) {
+    const api = Number(match[1]) + (match[2] ? Number(match[2]) / 100 : 0);
+    let flavors;
+    try {
+      flavors = fs.readdirSync(path.join(root, apiDir));
+    } catch {
+      continue;
+    }
+    for (const flavor of flavors) {
+      if (REJECTED_IMAGE_FLAVOR.test(flavor)) continue;
+      // Match `google_apis` and `google_apis_ps16k` alike, but never a *_playstore_* one.
+      if (!USABLE_IMAGE_FLAVORS.some((usable) => flavor === usable || flavor.startsWith(`${usable}_`))) {
+        continue;
+      }
       if (fs.existsSync(path.join(root, apiDir, flavor, 'x86_64'))) {
         found.push({ api, image: `system-images;${apiDir};${flavor};x86_64` });
       }
@@ -648,43 +682,116 @@ function waitForBoot(sdk, preexisting = []) {
 
 // ─── Build, install, Metro ────────────────────────────────────────────────────
 
-async function buildAndInstallDebug(sdk, java, serial) {
-  if (!fs.existsSync(ANDROID_DIR)) {
-    log('android/ not present — running expo prebuild…');
-    const pre = runSync(path.join(ROOT, 'node_modules', '.bin', 'expo'), [
-      'prebuild',
-      '--platform', 'android',
-      '--no-install',
-    ]);
-    if (pre.status !== 0) fail('expo prebuild failed (see output above).');
+/**
+ * Regenerate android/ when it is missing, or when the config that produced it has changed.
+ *
+ * Previously this ran only when android/ was absent, so an app.json or dependency change
+ * left a stale native project in place and the suite tested a build that no longer matched
+ * the source. The fingerprint covers app.json (scheme, permissions, plugins — all of which
+ * prebuild bakes into the manifest) and package.json (native modules arrive as dependencies).
+ * A changed fingerprint forces `--clean`, because prebuild merges into an existing tree and
+ * a removed plugin would otherwise survive in the generated manifest.
+ */
+function appConfigFingerprint() {
+  const crypto = require('node:crypto');
+  const parts = [];
+  for (const file of ['app.json', 'package.json']) {
+    try {
+      parts.push(fs.readFileSync(path.join(ROOT, file), 'utf8'));
+    } catch {
+      parts.push('');
+    }
   }
+  return crypto.createHash('sha256').update(parts.join('\0')).digest('hex');
+}
+
+function ensureNativeProject() {
+  const fingerprint = appConfigFingerprint();
+  const havePrebuild = fs.existsSync(ANDROID_DIR);
+  let stale = false;
+  if (havePrebuild) {
+    let stamped = null;
+    try {
+      stamped = fs.readFileSync(PREBUILD_STAMP, 'utf8').trim();
+    } catch {
+      stamped = null; // generated before stamping existed — treat as unknown, not stale
+    }
+    stale = stamped !== null && stamped !== fingerprint;
+  }
+
+  if (havePrebuild && !stale) return;
+  log(
+    havePrebuild
+      ? 'app.json/package.json changed since android/ was generated — re-running expo prebuild --clean…'
+      : 'android/ not present — running expo prebuild…'
+  );
+  const args = ['prebuild', '--platform', 'android', '--no-install'];
+  if (stale) args.push('--clean');
+  const pre = runSync(path.join(ROOT, 'node_modules', '.bin', 'expo'), args);
+  if (pre.status !== 0) fail('expo prebuild failed (see output above).');
+  fs.writeFileSync(PREBUILD_STAMP, fingerprint);
+}
+
+function gradleEnv(sdk, java) {
+  const env = { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk };
+  // Only point JAVA_HOME at a concrete path; if `java` came from PATH, leave JAVA_HOME alone
+  // and let Gradle find the same JDK on PATH.
+  if (path.isAbsolute(java)) env.JAVA_HOME = path.dirname(path.dirname(java));
+  return env;
+}
+
+/**
+ * Compile the debug APK. Deliberately `assembleDebug` and NOT `installDebug`: assembling
+ * needs no device, so the caller can start it before the emulator has booted and let the two
+ * overlap. `installDebug` would drag the whole build in behind the boot for no reason — the
+ * emulator used to sit idle for the entire Gradle run, competing for CPU and RAM with it.
+ */
+async function assembleDebug(sdk, java) {
+  ensureNativeProject();
 
   const gradlew = path.join(ANDROID_DIR, 'gradlew');
   if (!fs.existsSync(gradlew)) {
     fail('android/gradlew missing after prebuild — cannot build the debug APK.');
   }
 
+  // The 10–40 minute figure is a *first-build* cost (toolchain download + compiling every
+  // native module for each ABI). Once ~/.gradle is populated the same step is seconds, and
+  // printing the scary number every time trains people to ignore it.
+  const gradleCachePrimed = fs.existsSync(path.join(os.homedir(), '.gradle', 'caches'));
   log(
-    'building + installing debug APK (first Gradle run downloads dependencies; ' +
-      'this can take 10–40 minutes)…'
+    gradleCachePrimed
+      ? 'building debug APK (in parallel with the emulator boot)…'
+      : 'building debug APK (first Gradle run downloads the Android toolchain; this can take ' +
+          '10–40 minutes — later runs are seconds)…'
   );
-  const env = { ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk };
-  // Only point JAVA_HOME at a concrete JBR path; if `java` came from PATH, leave
-  // JAVA_HOME alone and let Gradle find the same JDK on PATH.
-  if (path.isAbsolute(java)) env.JAVA_HOME = path.dirname(path.dirname(java));
-  // installDebug shells out to adb; ANDROID_SERIAL pins it to our emulator for
-  // the same reason every explicit adb call carries `-s`.
-  if (serial) env.ANDROID_SERIAL = serial;
-  // `await` is load-bearing: runStreaming returns a Promise, so reading `.code`
-  // off the unresolved Promise made every run abort with "exit undefined" while
-  // the Gradle child kept going in the background.
-  const res = await runStreaming(gradlew, [':app:installDebug', '-x', 'lint'], {
+  // `await` is load-bearing: runStreaming returns a Promise, so reading `.code` off the
+  // unresolved Promise made every run abort with "exit undefined" while Gradle kept going.
+  const res = await runStreaming(gradlew, [':app:assembleDebug', '-x', 'lint'], {
     cwd: ANDROID_DIR,
-    env,
+    env: gradleEnv(sdk, java),
     timeoutMs: GRADLE_TIMEOUT_MS,
   });
   if (res.code !== 0) {
-    fail(`Gradle :app:installDebug failed (exit ${res.code}).`, res.code || 1);
+    fail(`Gradle :app:assembleDebug failed (exit ${res.code}).`, res.code || 1);
+  }
+  if (!fs.existsSync(DEBUG_APK)) {
+    fail(`Gradle reported success but ${DEBUG_APK} is missing.`);
+  }
+}
+
+/**
+ * Install the assembled APK onto the emulator this run started.
+ *
+ * `adb install` can print "Failure [...]" while still exiting 0, so the output is checked as
+ * well as the status — a silently failed install would surface much later as a flow timing
+ * out on a screen belonging to the previous build.
+ */
+function installDebugApk(sdk, serial) {
+  log('installing debug APK…');
+  const res = adb(sdk, ['install', '-r', '-d', DEBUG_APK], serial);
+  const output = `${res.stdout || ''}${res.stderr || ''}`;
+  if (res.status !== 0 || /Failure|Error:/i.test(output)) {
+    fail(`adb install of the debug APK failed. ${output.trim()}`);
   }
 }
 
@@ -753,15 +860,22 @@ async function main() {
   let exitCode = 1;
 
   try {
+    // Start Gradle before waiting for the boot: assembling needs no device, so the build and
+    // the boot overlap instead of running back to back. waitForBoot blocks this thread, but
+    // the Gradle child is a separate OS process and keeps compiling throughout.
+    const assembling = assembleDebug(sdk, java);
+
     serial = waitForBoot(sdk, preexistingSerials);
     adb(sdk, ['reverse', `tcp:${METRO_PORT}`, `tcp:${METRO_PORT}`], serial);
+
+    await assembling;
 
     // Build + install FIRST: `pm clear` / `pm grant` both need the package to
     // exist. Run before the install and they fail silently on a fresh device
     // (no CAMERA pre-grant) and never wipe anything on a repeat run — leaving
     // the previous run's guest session behind, which lands the app in the tabs
     // and stalls both flows on "Continue as Guest".
-    await buildAndInstallDebug(sdk, java, serial);
+    installDebugApk(sdk, serial);
 
     // Fresh app data (wipes any leftover session from a previous run)…
     const cleared = adb(sdk, ['shell', 'pm', 'clear', APP_ID], serial);
@@ -803,7 +917,10 @@ async function main() {
     log('✅ all Maestro flows passed');
   } else {
     console.error(
-      '[test:maestro] ❌ Maestro flows failed — see output above and e2e/maestro/artifacts/'
+      '[test:maestro] ❌ Maestro flows failed — see output above, e2e/maestro/artifacts/ for\n' +
+        '  emulator/Metro logs, and ~/.maestro/tests/<newest>/ for per-step screenshots and\n' +
+        '  view hierarchies (the hierarchy JSON is what tells you a view was off-screen\n' +
+        '  rather than mis-identified).'
     );
   }
   process.exit(exitCode);
@@ -851,7 +968,8 @@ if (require.main === module) {
     REQUIRED_APP_ENV,
     adb,
     bootEmulator,
-    buildAndInstallDebug,
+    assembleDebug,
+    ensureNativeProject,
     ensureAppCredentials,
     javaMajorVersion,
     listDeviceSerials,
@@ -861,6 +979,7 @@ if (require.main === module) {
     MIN_JAVA_MAJOR,
     MAX_JAVA_MAJOR,
     isUsableJavaMajor,
+    installedSystemImages,
     systemJavaCandidates,
   };
 }

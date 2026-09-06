@@ -273,3 +273,43 @@ No product decisions outstanding. Three for the human, in priority order:
    it would still boot something the app cannot install on, and the failure would present as a
    build failure. Requiring `MAESTRO_AVD` when it cannot create its own is the stricter option.
    Not blocking; needs a call.
+
+---
+
+## Addendum — follow-ups closed (2026-09-07, human session)
+
+Every follow-up this doc recorded has been implemented and verified by a live run; the verdict
+above is unchanged. Suite is now 268 jest tests, `npm run lint` covers `scripts/` for the first
+time, and `npm run test:maestro` is green end to end (`[Passed] barcode-scan (27s)`,
+`[Passed] manual-entry (30s)`, exit 0, no orphaned processes).
+
+- **`takeScreenshot`** — flows now pass a bare name. Maestro resolves the argument inside its
+  own per-run directory, so the repo-relative path only ever recreated that tree there.
+  Verified: `~/.maestro/tests/<run>/<flow>/takeScreenshot/<flow>.png`. The `.gitignore` comment
+  and the runner's failure message now point at Maestro's run directory for screenshots and
+  hierarchies, keeping `artifacts/` for the emulator and Metro logs it really does hold.
+- **`installedSystemImages()`** — fixed as one change, per this doc's warning. The API match
+  accepts a dotted directory (`android-37.1`) **and** Play-Store flavours are rejected
+  outright, so widening the match cannot resurrect the `inputText` hang. Four tests, including
+  one asserting no Play image is ever offered whatever its suffix.
+- **"10–40 minutes"** — conditional on whether `~/.gradle/caches` exists.
+- **Runner never linted** — `eslint.config.js` gained a `scripts/**` block (CommonJS, Node +
+  Jest globals; the Expo preset assumes RN/browser, which is why 73 "not defined" errors were
+  hiding there), and `lint` is now `expo lint && eslint scripts`.
+- **CI** — `.github/workflows/test-native-e2e.yml`: KVM, JDK 21 pinned with the reason,
+  Gradle cache, path-filtered to the camera/scan surface plus `workflow_dispatch`, credentials
+  from repo variables, Maestro's run directory uploaded as an artifact.
+- **Emulator idled through the build** (finding 11) — `assembleDebug` is split from the
+  install and started before the boot wait. Measured: `BUILD SUCCESSFUL in 4s` arrives *before*
+  `device booted`, i.e. entirely inside the boot window.
+- **Stale native project** (finding 12) — `ensureNativeProject()` fingerprints `app.json` +
+  `package.json` and forces `prebuild --clean` when they change.
+- **Doc staleness** — `CLAUDE.md` command list, `playwright.config.ts:4-6`, `README.md:55`
+  (JDK 17–21), and `barcode-scan.yaml`'s `.env`-only credentials header.
+
+One bug was found in the guards themselves while updating them: `indexOf('installDebugApk(…)')`
+matched the function *declaration*, which sits above every call site, making the "X after Y"
+ordering assertions vacuous — the `pm clear` guard had been passing for that reason. Both now
+anchor on the call site via a `callSiteIndex()` helper.
+
+Still human-scope, unchanged: PR #110's body.

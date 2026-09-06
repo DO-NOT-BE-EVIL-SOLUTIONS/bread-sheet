@@ -53,4 +53,7 @@ appId: com.breadsheetexpo.breadsheet
     timeout: 30000
 - assertNotVisible:
     id: ".*manual-barcode-input.*"
-- takeScreenshot: e2e/maestro/artifacts/manual-entry
+# Maestro resolves this inside its own per-run output directory
+# (~/.maestro/tests/<run>/manual-entry/takeScreenshot/), NOT the repo — a repo-relative
+# path here just recreates that tree in there. Bare name on purpose.
+- takeScreenshot: manual-entry

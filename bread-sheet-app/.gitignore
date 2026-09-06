@@ -42,7 +42,9 @@ yarn-error.*
 /playwright-report/
 /blob-report/
 
-# Maestro native E2E (TICKET-P9-003) — screenshots + emulator/metro logs
+# Maestro native E2E (TICKET-P9-003) — emulator + Metro logs written by
+# scripts/test-maestro.js. Flow screenshots do NOT land here: Maestro writes those under
+# ~/.maestro/tests/<run>/<flow>/takeScreenshot/.
 /e2e/maestro/artifacts/
 
 app-example
