@@ -35,21 +35,27 @@ appId: com.breadsheetexpo.breadsheet
 - tapOn:
     id: "manual-barcode-input"
 - inputText: "4006381333931"
-# Dismiss the soft keyboard before reaching for the button. The sheet's submit
-# control sits below the input, so an open IME pushes it off-screen — and an
-# off-screen view is absent from the hierarchy entirely, not merely covered, so
-# Maestro reports "Element not found: manual-barcode-submit" rather than a
-# tap that missed. Observed on API 35 with the Gboard IME up.
-- hideKeyboard
-- tapOn:
-    id: "manual-barcode-submit"
+# Submit with the keyboard's Go action rather than tapping the button.
+#
+# The button sits below the input, so an open IME pushes it off-screen — and an off-screen
+# Android view is absent from the hierarchy entirely, not merely covered, so Maestro reports
+# "Element not found: manual-barcode-submit". The obvious remedy, `hideKeyboard`, is worse:
+# on Android it is a back press, and this sheet is a <Modal onRequestClose={onClose}>, so
+# where no soft IME is up the back press dismisses the sheet instead. That is exactly what
+# happened on the CI emulator (no soft IME) while passing locally (Gboard up) — the flow's
+# behaviour depended on emulator keyboard configuration.
+#
+# The field sets returnKeyType="go" with onSubmitEditing={handleSubmit}, so Enter is a real
+# user action and is independent of IME state. The button itself stays covered by seven jest
+# tests (components/manual-barcode-sheet.test.tsx and the three screens that mount the sheet).
+- pressKey: Enter
 # Same falsifiable landing assertion as barcode-scan.yaml — and here it matters
 # most: "4006381333931" is this very sheet's placeholder, so if inputText never
 # reached the field, submit would show a validation error and the number would
 # still be on screen. A text assertion would pass without ever navigating.
 - extendedWaitUntil:
     visible:
-      id: ".*product-(screen|not-found|offline).*"
+      id: ".*product-(screen|not-found|offline|error).*"
     timeout: 30000
 - assertNotVisible:
     id: ".*manual-barcode-input.*"

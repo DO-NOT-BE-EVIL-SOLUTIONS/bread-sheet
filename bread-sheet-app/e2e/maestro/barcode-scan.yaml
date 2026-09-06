@@ -53,7 +53,7 @@ appId: com.breadsheetexpo.breadsheet
 # down the ScrollView and may not be `visible` to Maestro at all.
 - extendedWaitUntil:
     visible:
-      id: ".*product-(screen|not-found|offline).*"
+      id: ".*product-(screen|not-found|offline|error).*"
     timeout: 30000
 # Belt and braces: the scan tab's camera UI is gone, so we really navigated.
 - assertNotVisible:

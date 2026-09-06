@@ -561,7 +561,10 @@ export default function ProductScreen() {
 
   if (loadError && !notFound && !product) {
     return (
-      <ThemedView style={styles.center}>
+      // testID (P9-003): the fourth product-screen state. The Maestro flows assert they landed
+      // on the product screen in *any* state; without this one a backend hiccup reads as a
+      // navigation failure, which is what it did in CI.
+      <ThemedView style={styles.center} testID="product-error">
         <ThemedText style={styles.errorText}>
           {formatApiError(loadError, 'Could not load this product. Please try again.')}
         </ThemedText>

@@ -76,7 +76,13 @@ describe('Maestro E2E wiring (TICKET-P9-003)', () => {
       // Landing assertions must be on the product screen's testIDs. Asserting
       // the literal barcode instead is vacuous: it is also the manual sheet's
       // placeholder, so it stays on screen when navigation never happened.
-      expect(yaml).toContain('product-(screen|not-found|offline)');
+      // Matched loosely on purpose: the set of product-screen states may grow (it gained
+      // `error` after a CI run showed a failed lookup reading as a navigation failure). What
+      // must not change is that flows assert a product-screen testID rather than the barcode
+      // text — "4006381333931" is also the manual sheet's placeholder, so a text assertion
+      // stays satisfied when navigation never happened.
+      expect(yaml).toMatch(/id: "\.\*product-\((?:screen\|not-found\|offline[^"]*)\)\.\*"/);
+      expect(yaml).not.toMatch(/visible: ["']4006381333931["']/);
       expect(yaml).not.toMatch(/visible:\s*"4006381333931"/);
       // Every flow starts from a signed-out app: they run in sequence and each
       // signs in as a guest, so a flow that inherits the previous one's session
