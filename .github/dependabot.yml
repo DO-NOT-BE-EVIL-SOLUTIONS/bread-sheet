@@ -10,6 +10,14 @@ updates:
     schedule:
       interval: "weekly"
 
+  # The standalone Mastra dev-team harness. Without this entry it received only
+  # Dependabot *security* PRs (which run on every detected manifest) and no routine
+  # version updates, so it silently drifted behind — @mastra/core sat 7 minors stale.
+  - package-ecosystem: "npm"
+    directory: "/agent-team"
+    schedule:
+      interval: "weekly"
+
   - package-ecosystem: "terraform"
     directory: "/terraform"
     schedule:
