@@ -42,8 +42,9 @@ Applied in order in `app.ts`:
 | 6 | `requireSelf(param)` | user-scoped routes | Compares `req.user.id` to route param; `403` on mismatch |
 | 7 | `requireGroupMember` | group routes | Verifies `GroupMember` record exists; `403` if not |
 | 8 | `requireGroupAdmin` | group admin routes | Same as above + asserts `role === 'ADMIN'` |
-| 9 | Controllers | — | Handle request, call service, send response |
-| 10 | `errorHandler` | global | Two-channel sanitiser — full detail to logs, generic copy to client |
+| 9 | `requestDeadline()` | the two Gemini routes | 25 s handler deadline; `503 request_timeout` if nothing has responded by then |
+| 10 | Controllers | — | Handle request, call service, send response |
+| 11 | `errorHandler` | global | Two-channel sanitiser — full detail to logs, generic copy to client; returns early if the response already started |
 
 Authorization guards (6–8) are composable and applied at the **router layer**, not inside controllers.
 
@@ -302,6 +303,16 @@ The controller (`labelExtractionController.ts`) branches on `getVisionMode()`: `
 - **Vertex AI** (production, keyless): set `GOOGLE_GENAI_USE_VERTEXAI=true` plus `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. The SDK authenticates through the same keyless **Workload Identity Federation** `authClient` used by `live` Vision (`services/gcpWorkloadIdentity.ts`, configured by `GCP_WORKLOAD_IDENTITY_AUDIENCE` + `GCP_SERVICE_ACCOUNT_EMAIL`) — the AWS task role impersonates the GCP service account, no `GEMINI_API_KEY` needed. The service account requires `roles/aiplatform.user`.
 
 `config.ts` validates the required combination at startup (Vertex needs project+location; otherwise a key is required). Schema validation is enforced by Gemini's `responseSchema` + `responseMimeType: 'application/json'`, so callers `JSON.parse` the response and cast directly. The full Gemini response is logged at `debug` level (`vision:llm raw response` / `plausibility:gemini raw response`).
+
+**Timeout budget (ADR 0003 § step 0a).** Both Gemini callers run inside `withGeminiDeadline()` (`services/geminiDeadline.ts`), which hands the SDK an `AbortSignal` and maps a breach to a `503` with `code: 'upstream_timeout'`. The two routes that make those calls additionally carry `requestDeadline()` (`middlewares/requestDeadline.ts`), which answers with `503 request_timeout` if the whole handler — `sharp`, the S3 write, Prisma included — outlives its budget. The deadlines are nested so the innermost always fires first:
+
+| Layer | Budget | Result on breach |
+|---|---:|---|
+| `withGeminiDeadline` on the model call | 20 s | `503 upstream_timeout`, call actually aborted |
+| `requestDeadline()` on the route | 25 s | `503 request_timeout` |
+| API Gateway integration timeout (future ingress) | 30 s, fixed | opaque `504`, upload lost — must never be reached |
+
+Two consequences worth knowing. `requestDeadline` cannot *cancel* the handler (Express has no mechanism for it), so the handler may finish afterwards and try to write to a response that has already been sent — which is why `errorHandler` returns early on `res.headersSent`. And the 5xx messages never reach the user: `errorHandler` collapses every 5xx to generic copy and the app's `formatApiError` does the same, so `code` is the only part of a timeout the client can branch on.
 
 **Parser design (`labelExtractionService.ts`):**
 - All patterns use the `m` flag so `^` anchors to the start of each line, preventing sub-entry rows ("of which saturates", "davon Zucker") from matching the parent-nutrient patterns.

@@ -122,6 +122,16 @@ down from the ALB's adjustable 60 s. Implementation step 0 settles it before any
 names **I-E** as the fallback if it fails. The database and `dev`-stage decisions are independent of
 that gate and stand regardless.
 
+**Both stages run the same ingress.** `dev` does not keep its ALB. A `dev` that differs from `prod`
+in the one layer being changed cannot rehearse it, and this ADR's whole implementation risk sits in
+that layer — Cloud Map SRV registration, VPC-link immutability, the stage-path trap, the 60-day
+`INACTIVE` transition. It also keeps the Terraform root honest: `local.name_prefix` is already
+`breadsheet-${var.environment}`, so one root serves both stages from two `.tfvars` files with **no
+conditional ingress resources**. The alternative — `count = var.ingress == "alb" ? 1 : 0` scattered
+across `alb.tf`, `security.tf` and `dns.tf` — is more work than rebuilding `dev`'s ingress and
+leaves permanently dead code in the root. `dev` therefore goes first and is the proving ground;
+`prod` is stamped from the same code once `dev` is green.
+
 Production target, 730 hr:
 
 | | $/mo |
@@ -200,7 +210,9 @@ budget problem, not to an architecture problem.
 Destroying it saves all of it. The stack is fully Terraform-owned with a documented snapshot/restore
 path, so recreation is a known quantity — and repeated create/destroy cycles surface hidden
 dependencies (cert validation, IAM resource IDs, image pin drift) far better than an idling stack
-does. `dev` keeps its ALB; it simply stops existing between sessions.
+does. `dev` gets the same API Gateway ingress as `prod` (see the Decision Outcome) and simply stops
+existing between sessions — which also makes its ingress migration a destroy/recreate rather than an
+in-place change, side-stepping the `service_registries` ForceNew hazard in step 3 entirely.
 
 ### Positive Consequences
 
@@ -209,8 +221,11 @@ does. `dev` keeps its ALB; it simply stops existing between sessions.
 * Production stays permanently warm — no cold-start regression on the app's primary interaction.
 * Exposes three layers the ALB was hiding: Cloud Map service discovery, VPC links, and API Gateway
   request/stage mapping. Net *increase* in architectural surface learned, while cutting cost.
-* `dev` and `prod` diverge in ingress only, which is a useful comparison to have running.
-* Prod is greenfield, so this is a build decision rather than a migration — no cutover risk.
+* `dev` and `prod` stay identical in shape, so `dev` rehearses the exact layer this ADR changes —
+  and the Terraform root needs no per-stage ingress branching (`local.name_prefix` already
+  parameterises everything by `var.environment`).
+* Prod is greenfield, so *its* build carries no cutover risk; the one real migration is `dev`'s, and
+  ephemeral `dev` (step 1) reduces that to a destroy/recreate.
 
 ### Negative Consequences
 
@@ -242,38 +257,101 @@ does. `dev` keeps its ALB; it simply stops existing between sessions.
   a TTL-15 SRV record, so a small number of in-flight requests may fail per deploy. Acceptable at
   hobby traffic and with the deployment circuit breaker still active, but it is a real property
   given up, not merely a control surface moved.
-* `dev` and `prod` no longer share an ingress shape, so the rehearsal value of `dev` drops for that
-  one layer unless `dev` is periodically brought up in the prod configuration.
+* **`dev`'s ingress has to be rebuilt, not just prod's built.** Bringing `dev` onto the same shape
+  costs an extra destroy/recreate cycle and puts the only running stage behind an untested ingress
+  for the duration. The upside is that every hazard in steps 3–5 is discovered on `dev` rather than
+  on `prod`; the cost is that `dev` is briefly the guinea pig, and its ALB — a known-good fallback
+  — is deleted rather than parked.
 * Ephemeral `dev` adds friction: nothing is reachable without an `apply` first, and the image pin in
   `ecs.tf` must be checked before each recreate (a known hazard already documented).
 * An RDS Reserved Instance (D-B) is a 12-month financial commitment on a private project.
 
 ## Implementation
 
-Prod does not exist yet, so **there is no cutover** — the new ingress shape is built directly into
-the new stage. Step 0 gates the decision itself; steps 1–2 are prerequisites that apply to any
-ingress; steps 3–5 are the prod build; step 6 is partly required and partly deferred.
+Both stages get the same ingress, so this is built **on `dev` first** and `prod` is stamped from the
+same Terraform root with a second `.tfvars`. `dev` is therefore the rehearsal, and the only
+migration in this ADR is `dev`'s — which step 1 turns into a destroy/recreate rather than an
+in-place change. That ordering matters: **step 1 must land before steps 3–5**, or the ingress
+swap on the live `dev` service hits the `service_registries` ForceNew hazard in step 3.
 
-### 0. Measure the Gemini paths against the 30 s cap (**blocking gate**)
+Step 0 gates the decision itself; steps 1–2 are prerequisites that apply to any ingress; steps 3–5
+build the new ingress (on `dev`, then unchanged on `prod`); step 6 is partly required and partly
+deferred; step 7 is the `prod` stamp.
 
-Before building anything, measure p99 latency of the two endpoints that make synchronous Gemini
-calls, against the **current** `dev` ALB with `PLAUSIBILITY_MODE=gemini` and `VISION_MODE=llm`:
+### 0. Bound the Gemini paths, then measure them (**blocking gate**)
 
-* `POST /api/products/extract-label` — image → `ExtractedLabel` JSON, one multimodal call.
-* the image upload path through `uploadImage` — plausibility gate, synchronous, pre-S3-write.
+The gate is not "is Gemini fast enough?" — that is a question about someone else's service, and we
+do not control the answer. It is **"can these two endpoints be made to finish inside a deadline we
+set?"** Today they cannot, because nothing bounds them: the only `AbortSignal` in the entire server
+is the 5 s Open Food Facts lookup in `productService.ts:32`. Every Gemini call — plausibility and
+label extraction, Developer API or Vertex — runs unbounded. An unbounded call has no measurable
+tail, which is why the bound comes first and the measurement second.
 
-Use realistic worst-case inputs: a 2 MB image at `MAX_LABEL_IMAGE_LONGEST_EDGE` (1600 px), on a cold
-Vertex connection, not a warmed-up local fixture. The `request:finish` log line already carries
-`durationMs`, so the data is available from CloudWatch without new instrumentation.
+#### 0a. Give the Gemini calls a timeout budget (code only, no infra) — **done**
 
-* **p99 comfortably under ~20 s** — proceed with steps 1–6 as written.
-* **p99 near or above 30 s** — do not proceed directly. Either make the plausibility gate
-  asynchronous (upload → `202` → poll or push), which also decouples the no-orphans guarantee from
-  request duration and is the better design independently; or fall back to **I-E (Cloudflare
-  Tunnel)**, which hits the same cost target with no timeout ceiling.
+> Implemented: `services/geminiDeadline.ts` (20 s `AbortSignal` on the model call →
+> `503 upstream_timeout`) and `middlewares/requestDeadline.ts` (25 s handler deadline →
+> `503 request_timeout`), mounted on `POST /api/products/upload-image` and
+> `POST /api/products/extract-label`. `errorHandler` gained a `res.headersSent` guard, since the
+> handler deadline can answer while the handler is still running. See `backend.md` § Vision / OCR.
 
-Retaining the ALB is *not* a fallback: it reinstates $18.40/mo and erases the entire saving this
-ADR exists to capture.
+Nest the deadlines so the innermost always fires first:
+
+| Layer | Deadline | Behaviour on breach |
+|---|---:|---|
+| API Gateway integration | 30 s (fixed) | 504, opaque, upload lost — must never be reached |
+| Express request handler | 25 s | 503 via `AppError`, generic fallback copy |
+| Gemini call (`AbortSignal.timeout`) | 20 s | typed error → 503 with actionable copy |
+
+The 20 s inner budget is the number 0b validates. Surface the breach as an `AppError` so the client
+renders `formatApiError`'s 5xx fallback rather than an SDK message, and log it at `warn` with the
+elapsed time so the budget can be re-tuned from real data.
+
+This is worth doing on its own merits and under **any** ingress: a hung Vertex call currently
+occupies a request on a single 0.25 vCPU task indefinitely. It is also what converts the 30 s cap
+from an external hazard into an internal budget — with 0a in place, a slow Gemini response is a
+clean 503 the client can retry, not a 504 with the user's upload gone.
+
+#### 0b. Measure the budget — a synthetic batch, not sampled traffic
+
+There is no p99 to read: `dev` serves no traffic and a private prod will not either. Run a synthetic
+batch instead, against `dev` **through its current ALB**, with `PLAUSIBILITY_MODE=gemini` and
+`VISION_MODE=llm`:
+
+* ≥ 30 requests to `POST /api/products/extract-label` — image → `ExtractedLabel` JSON, one
+  multimodal call.
+* ≥ 30 uploads through `uploadImage` — the plausibility gate, synchronous, pre-S3-write.
+
+Inputs must be worst-case rather than fixtures: a 2 MB JPEG at `MAX_LABEL_IMAGE_LONGEST_EDGE`
+(1600 px), issued serially, with the first few requests fired immediately after a task restart so a
+cold Vertex connection and the WIF token exchange land inside the sample. `durationMs` is already on
+the `request:finish` log line — no new instrumentation.
+
+Record two things, because this run is the only cheap chance at the second:
+
+1. **max and spread of `durationMs`.** At n=30 the max *is* the tail; do not dress it up as a
+   percentile.
+2. **Task memory**, from the ECS `MemoryUtilization` metric across the batch. The task is
+   256 CPU / 512 MB (`ecs.tf:30-31`) and the server runs `sharp`/libvips over a multer
+   `memoryStorage()` buffer capped at 4 MB (`productRoutes.ts:27-29`). Once the ALB is gone the
+   single task *is* the stage, so an OOM is an outage rather than a shed target. If utilisation
+   peaks above ~75 %, raise the task to 1 GB (~+$3.60/mo) as part of step 2 — cheap against the
+   $22/mo the ingress change frees.
+
+#### Outcomes
+
+* **Max under ~20 s, no breaches** — the budget holds. Proceed with steps 1–6 as written.
+* **Breaches at 20 s but comfortably under 30 s** — raise the inner budget (22 s / 25 s / 28 s) and
+  re-run. The ceiling is real but there is room inside it; record the final numbers in `backend.md`.
+* **Breaches at or near 30 s** — what fails is the *synchronous design*, not the ingress. Make the
+  plausibility gate asynchronous (upload → `202` → poll or push), which decouples the no-orphans
+  guarantee from request duration and is the better design independently. Only if that rework is
+  judged too large right now, fall back to **I-E (Cloudflare Tunnel)**, which reaches the same cost
+  target without a timeout ceiling.
+
+Retaining the ALB is *not* a fallback: it reinstates $18.40/mo **per stage** and erases the entire
+saving this ADR exists to capture. It also only defers the problem — an unbounded upstream call
+fails at 60 s instead of 30 s, so 0a is required either way.
 
 ### 1. Make `dev` ephemeral (do first — it funds the rest)
 
@@ -283,7 +361,10 @@ resolves in GHCR (the runbook's existing `ghcr.io/token` check) — it has alrea
 
 Retain the manual RDS snapshot workflow from Tier 3 as the data-preservation mechanism.
 
-The only Terraform change is the DNS carve-out below; everything else is runbook.
+The only Terraform change *at this step* is the DNS carve-out below; everything else is runbook. The
+ingress rebuild is steps 3–5, and it lands on the next recreate — which is why this step comes
+first: `dev` is destroyed while it still has its ALB and comes back already on the new shape, with
+no in-place ingress swap on a running service.
 
 > **Exclude the hosted zone and its certificate from the destroy cycle.** `aws_route53_zone.dev` is
 > delegated from the parent `bread-sheet.com` zone, which is **not** managed by this Terraform root.
@@ -301,7 +382,7 @@ liveness signal at all.
 
 ```hcl
 healthCheck = {
-  command     = ["CMD-SHELL", "curl -fsS http://localhost:3000/ || exit 1"]
+  command     = ["CMD-SHELL", "wget -q -O- http://localhost:3000/ || exit 1"]
   interval    = 30
   timeout     = 5
   retries     = 3
@@ -310,8 +391,12 @@ healthCheck = {
 ```
 
 `GET /` is the existing ALB health-check target, so the endpoint is already proven. `startPeriod`
-must cover `scripts/start.sh` running `npm run db:deploy` before `node dist/server.js`. Confirm
-`curl` exists in the runtime image; if not, use a `node -e` one-liner instead.
+must cover `scripts/start.sh` running `npm run db:deploy` before `node dist/server.js`.
+
+> **Not `curl`.** `server/Dockerfile` is `FROM node:24-alpine` and installs only
+> `openssl ca-certificates`; there is no `curl` in the runtime image. BusyBox `wget` is present, so
+> the command above works as written — a `node -e` one-liner is the alternative if the health check
+> ever needs to assert more than a 2xx.
 
 Removing the `load_balancer` block also removes the service's `health_check_grace_period_seconds`
 (it is ALB-only) — `startPeriod` is its replacement, hence the 150 s.
@@ -330,7 +415,7 @@ Create a private DNS namespace and a service, and attach it to the ECS service v
 
 ```hcl
 resource "aws_service_discovery_private_dns_namespace" "main" {
-  name = "breadsheet-prod.local"
+  name = "${local.name_prefix}.local"   # breadsheet-dev.local / breadsheet-prod.local
   vpc  = aws_vpc.main.id
 }
 
@@ -352,21 +437,23 @@ service_registries {
 }
 ```
 
-> **If this is ever retrofitted to `dev`:** `service_registries` is `ForceNew` in the AWS provider —
-> adding it to an existing ECS service **replaces the service**. Irrelevant for greenfield prod;
-> decisive if the change is backported.
+> **`service_registries` is `ForceNew`** in the AWS provider — adding it to an *existing* ECS service
+> replaces the service. Irrelevant for greenfield `prod`, and neutralised on `dev` by doing step 1
+> first: the stage is destroyed and recreated, so the registry is present from creation and there is
+> no in-place add. Attempting the ingress swap on a running `dev` service is the one sequence that
+> makes this bite.
 
 ### 4. VPC Link v2 + HTTP API + custom domain
 
 ```hcl
 resource "aws_apigatewayv2_vpc_link" "main" {
-  name               = "breadsheet-prod-vpclink"
+  name               = "${local.name_prefix}-vpclink"
   subnet_ids         = [for s in aws_subnet.public : s.id]
   security_group_ids = [aws_security_group.vpclink.id]
 }
 
 resource "aws_apigatewayv2_api" "main" {
-  name          = "breadsheet-prod-api"
+  name          = "${local.name_prefix}-api"
   protocol_type = "HTTP"
 }
 
@@ -437,11 +524,22 @@ Mirror the existing pattern in `security.tf` — each hop references the previou
   pattern against the database changes shape, and a 12-month commitment to an instance class should
   not be made ahead of that.
 
+### 7. Stamp `prod` from the same root
+
+Once `dev` has come up clean on the new ingress at least once, add `environments/prod.tfvars` +
+`prod.s3.tfbackend` and apply. No new Terraform is written at this step — that is the point of
+keeping both stages on one shape. What differs is `.tfvars` only: `environment = "prod"`, the S3
+bucket name, the GCP WIF pool, and `db_deletion_protection = true` / `db_skip_final_snapshot = false`
+(currently `false` / `true`, which are correct for a disposable `dev` and wrong for `prod`).
+
 ### Not in scope
 
-Retrofitting `dev` to the API Gateway ingress. `dev` keeps its ALB and simply stops existing between
-sessions (step 1), which is cheaper than rebuilding it. Revisit only if `dev` needs to rehearse the
-prod ingress specifically.
+* **Deleting the ALB Terraform.** Keep `alb.tf` in git history rather than pretending it never
+  existed; if step 0 lands on I-E, or the VPC-link path proves unworkable on `dev`, the fastest
+  recovery is to restore it. Removing the resources from the root is fine — the file is recoverable.
+* **A second `prod`-only Terraform root or a module extraction.** One root, two `.tfvars`, no
+  conditional ingress. Revisit only if `prod` ever needs to diverge structurally from `dev`, which
+  this ADR is specifically arranged to avoid.
 
 ## References
 

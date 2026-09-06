@@ -154,7 +154,13 @@ export const errorHandler = (
     logger.warn('handled error in request', logPayload);
   }
 
-  // 3. Sanitized client response.
+  // 3. Nothing left to send if the response already started. `requestDeadline`
+  //    can answer a slow request while its handler is still running; when that
+  //    handler finishes it lands here, and writing a second time throws
+  //    ERR_HTTP_HEADERS_SENT. The log above is the useful part — keep it and stop.
+  if (res.headersSent) return;
+
+  // 4. Sanitized client response.
   const body: { message: string; code?: string } = { message };
   if (code) body.code = code;
   res.status(status).json(body);

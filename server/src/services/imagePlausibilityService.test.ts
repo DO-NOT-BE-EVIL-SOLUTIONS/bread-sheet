@@ -98,6 +98,19 @@ describe('imagePlausibilityService', () => {
       expect(call.contents[0].parts[1].text).toMatch(/front-of-pack/i);
     });
 
+    it('passes an AbortSignal so the deadline actually cancels the call', async () => {
+      mockGenerateContent.mockResolvedValue({ text: JSON.stringify(OK_RESPONSE) });
+      const { checkImage } = await import('./imagePlausibilityService.js');
+
+      await checkImage(Buffer.from('x'), 'image/jpeg', 'product');
+
+      // Without this the budget in geminiDeadline.ts would abandon the request
+      // rather than abort it, and the socket would stay open past the deadline.
+      const call = mockGenerateContent.mock.calls[0][0];
+      expect(call.config.abortSignal).toBeInstanceOf(AbortSignal);
+      expect(call.config.abortSignal.aborted).toBe(false);
+    });
+
     it('uses a label-specific prompt for label images', async () => {
       mockGenerateContent.mockResolvedValue({ text: JSON.stringify(OK_RESPONSE) });
       const { checkImage } = await import('./imagePlausibilityService.js');

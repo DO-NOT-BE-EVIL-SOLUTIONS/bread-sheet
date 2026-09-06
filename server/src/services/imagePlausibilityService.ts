@@ -1,6 +1,7 @@
 import { Type } from '@google/genai';
 import logger from '../logger.js';
 import { getGeminiClient } from '../geminiClient.js';
+import { withGeminiDeadline } from './geminiDeadline.js';
 import type { ImageKind } from './imageService.js';
 
 const MODEL = 'gemini-3.5-flash';
@@ -93,22 +94,25 @@ async function checkGemini(
   kind: ImageKind,
 ): Promise<PlausibilityResult> {
   const client = getGeminiClient();
-  const response = await client.models.generateContent({
-    model: MODEL,
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { inlineData: { mimeType, data: buffer.toString('base64') } },
-          { text: buildPrompt(kind) },
-        ],
+  const response = await withGeminiDeadline('plausibility', (abortSignal) =>
+    client.models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: buffer.toString('base64') } },
+            { text: buildPrompt(kind) },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema,
+        abortSignal,
       },
-    ],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema,
-    },
-  });
+    }),
+  );
 
   const raw = response.text ?? '';
   logger.debug('plausibility:gemini raw response', { kind, length: raw.length, text: raw });

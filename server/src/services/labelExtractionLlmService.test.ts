@@ -46,6 +46,19 @@ describe('extractLabelWithLlm', () => {
     delete process.env.GEMINI_API_KEY;
   });
 
+  it('passes an AbortSignal so the deadline actually cancels the call', async () => {
+    mockGenerateContent.mockResolvedValue({ text: JSON.stringify(FAKE_RESPONSE) });
+    const { extractLabelWithLlm } = await import('./labelExtractionLlmService.js');
+
+    await extractLabelWithLlm(Buffer.from('x'), 'image/jpeg');
+
+    // Without this the budget in geminiDeadline.ts would abandon the request
+    // rather than abort it, and the socket would stay open past the deadline.
+    const call = mockGenerateContent.mock.calls[0][0];
+    expect(call.config.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(call.config.abortSignal.aborted).toBe(false);
+  });
+
   it('sends the image + prompt to Gemini and returns parsed JSON', async () => {
     mockGenerateContent.mockResolvedValue({ text: JSON.stringify(FAKE_RESPONSE) });
     const { extractLabelWithLlm } = await import('./labelExtractionLlmService.js');

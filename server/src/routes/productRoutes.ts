@@ -5,6 +5,7 @@ import {
   requireRegistered,
 } from '../middlewares/authMiddleware.js';
 import { apiLimiter, userLimiter } from '../middlewares/rateLimit.js';
+import { requestDeadline } from '../middlewares/requestDeadline.js';
 import {
   getProductByBarcode,
   submitProduct,
@@ -43,9 +44,15 @@ function handleUploadError(
 
 router.get('/:barcode', requireAuth, userLimiter, getProductByBarcode);
 
+// The two synchronous Gemini paths. `requestDeadline` is the outer half of the
+// budget in ADR 0003 § step 0 — the inner half is `withGeminiDeadline` around
+// the model call itself. Both must stay comfortably below API Gateway's fixed
+// 30 s integration timeout, which answers with an opaque 504 and loses the
+// upload.
 router.post(  '/upload-image',
   requireAuth,
   apiLimiter,
+  requestDeadline(),
   upload.single('image'),
   uploadImage,
   handleUploadError,
@@ -56,6 +63,7 @@ router.post(
   requireAuth,
   apiLimiter,
   requireRegistered,
+  requestDeadline(),
   upload.single('image'),
   handleUploadError,
   extractLabel,

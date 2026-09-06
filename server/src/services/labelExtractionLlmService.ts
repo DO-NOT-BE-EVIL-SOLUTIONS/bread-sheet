@@ -1,6 +1,7 @@
 import { Type } from '@google/genai';
 import logger from '../logger.js';
 import { getGeminiClient } from '../geminiClient.js';
+import { withGeminiDeadline } from './geminiDeadline.js';
 import type { ExtractedLabel } from './labelExtractionService.js';
 
 const MODEL = 'gemini-3.5-flash';
@@ -56,22 +57,25 @@ export async function extractLabelWithLlm(
   mimeType = 'image/jpeg',
 ): Promise<ExtractedLabel> {
   const client = getGeminiClient();
-  const response = await client.models.generateContent({
-    model: MODEL,
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { inlineData: { mimeType, data: buffer.toString('base64') } },
-          { text: PROMPT },
-        ],
+  const response = await withGeminiDeadline('label-extraction', (abortSignal) =>
+    client.models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: buffer.toString('base64') } },
+            { text: PROMPT },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema,
+        abortSignal,
       },
-    ],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema,
-    },
-  });
+    }),
+  );
 
   const raw = response.text ?? '';
   logger.debug('vision:llm raw response', { length: raw.length, text: raw });
