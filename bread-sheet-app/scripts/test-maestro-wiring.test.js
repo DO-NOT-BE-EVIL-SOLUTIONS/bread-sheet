@@ -344,4 +344,38 @@ describe('runner regressions (TICKET-P9-003)', () => {
     expect(RUNNER_SRC).toMatch(/args\.push\('--clean'\)/);
   });
 
+
+  // TICKET-P9-003 — overlapping the Gradle build with the emulator boot helps on a developer
+  // machine and breaks a small CI runner: a cold RN build saturates every core and the
+  // emulator never reaches adb inside the boot timeout. Observed on a 2-vCPU GitHub runner.
+  describe('build/boot overlap policy', () => {
+    const saved = process.env.MAESTRO_OVERLAP_BUILD;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.MAESTRO_OVERLAP_BUILD;
+      else process.env.MAESTRO_OVERLAP_BUILD = saved;
+    });
+
+    test('follows the CPU count by default', () => {
+      delete process.env.MAESTRO_OVERLAP_BUILD;
+      expect(runner.canOverlapBuildAndBoot()).toBe(runner.cpuCount() >= 4);
+    });
+
+    test('MAESTRO_OVERLAP_BUILD forces the decision either way', () => {
+      process.env.MAESTRO_OVERLAP_BUILD = '0';
+      expect(runner.canOverlapBuildAndBoot()).toBe(false);
+      process.env.MAESTRO_OVERLAP_BUILD = '1';
+      expect(runner.canOverlapBuildAndBoot()).toBe(true);
+    });
+
+    test('both paths still install only after the build they came from', () => {
+      // The sequential branch awaits assembleDebug directly; the parallel one awaits the
+      // pending promise. Either way the install must follow, or a stale APK gets pushed.
+      expect(RUNNER_SRC).toMatch(/await assembling;/);
+      expect(RUNNER_SRC).toMatch(/await assembleDebug\(sdk, java\);/);
+      const install = callSiteIndex(RUNNER_SRC, 'installDebugApk');
+      expect(install).toBeGreaterThan(RUNNER_SRC.indexOf('await assembling;'));
+      expect(install).toBeGreaterThan(RUNNER_SRC.indexOf('await assembleDebug(sdk, java);'));
+    });
+  });
+
 });

@@ -153,6 +153,25 @@ function httpGet(url) {
 
 // ─── Prerequisite resolution ─────────────────────────────────────────────────
 
+/** Cores this process may actually use — cgroup-aware where Node exposes it. */
+function cpuCount() {
+  return typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+}
+
+/**
+ * Whether to run the Gradle build concurrently with the emulator boot.
+ *
+ * Four is the smallest count where a cold React Native build reliably leaves enough CPU for
+ * an emulator to reach `sys.boot_completed`. `MAESTRO_OVERLAP_BUILD` forces the decision
+ * either way (`1`/`0`) for a machine that disagrees with the heuristic.
+ */
+function canOverlapBuildAndBoot() {
+  const forced = process.env.MAESTRO_OVERLAP_BUILD;
+  if (forced === '1') return true;
+  if (forced === '0') return false;
+  return cpuCount() >= 4;
+}
+
 function resolveAndroidSdk() {
   const candidates = [
     process.env.ANDROID_HOME,
@@ -865,21 +884,31 @@ async function main() {
   }
 
   const preexistingSerials = listDeviceSerials(sdk);
-  const emulatorChild = bootEmulator(sdk, avd);
+  let emulatorChild = null;
   let metroChild = null;
   let serial = null;
   let exitCode = 1;
 
   try {
-    // Start Gradle before waiting for the boot: assembling needs no device, so the build and
-    // the boot overlap instead of running back to back. waitForBoot blocks this thread, but
-    // the Gradle child is a separate OS process and keeps compiling throughout.
-    const assembling = assembleDebug(sdk, java);
+    // Overlapping the Gradle build with the emulator boot is a win on a developer machine and
+    // a liability on a small CI runner: a cold RN build saturates every core, the emulator
+    // gets starved, and it fails to attach to adb inside BOOT_TIMEOUT_MS while Gradle is still
+    // compiling. Observed on a 2-vCPU GitHub runner — "emulator did not attach to adb within
+    // 300s" with Kotlin tasks still printing after teardown. So overlap only where there are
+    // cores to spare, and otherwise build first and boot into an idle machine.
+    if (canOverlapBuildAndBoot()) {
+      emulatorChild = bootEmulator(sdk, avd);
+      const assembling = assembleDebug(sdk, java);
+      serial = waitForBoot(sdk, preexistingSerials);
+      await assembling;
+    } else {
+      log(`${cpuCount()} usable CPU(s) — building first, then booting (no overlap)`);
+      await assembleDebug(sdk, java);
+      emulatorChild = bootEmulator(sdk, avd);
+      serial = waitForBoot(sdk, preexistingSerials);
+    }
 
-    serial = waitForBoot(sdk, preexistingSerials);
     adb(sdk, ['reverse', `tcp:${METRO_PORT}`, `tcp:${METRO_PORT}`], serial);
-
-    await assembling;
 
     // Build + install FIRST: `pm clear` / `pm grant` both need the package to
     // exist. Run before the install and they fail silently on a fresh device
@@ -980,6 +1009,8 @@ if (require.main === module) {
     adb,
     bootEmulator,
     assembleDebug,
+    canOverlapBuildAndBoot,
+    cpuCount,
     ensureNativeProject,
     ensureAppCredentials,
     javaMajorVersion,

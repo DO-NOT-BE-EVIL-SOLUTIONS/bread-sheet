@@ -125,6 +125,13 @@ jobs:
       - name: Run Maestro flows
         run: npm run test:maestro
         env:
+          # Hosted runners are small, so the runner's own heuristic already declines to overlap
+          # the Gradle build with the emulator boot here — set explicitly so a larger runner
+          # cannot silently re-enable the contention that made the emulator miss adb.
+          MAESTRO_OVERLAP_BUILD: '0'
+          # A cold boot of a fresh AVD on a 2-vCPU runner is slower than any developer machine;
+          # the default 5 minutes is comfortable locally and tight here.
+          MAESTRO_BOOT_TIMEOUT_MS: '600000'
           EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
