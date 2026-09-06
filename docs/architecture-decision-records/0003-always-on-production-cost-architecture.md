@@ -314,6 +314,17 @@ clean 503 the client can retry, not a 504 with the user's upload gone.
 
 #### 0b. Measure the budget — a synthetic batch, not sampled traffic
 
+> Harness: `server/scripts/measure-gemini-latency.mjs` (`npm run measure:gemini`). It fires the
+> batch, discards any request that carries no timing signal rather than averaging it in, and prints
+> a verdict mapped to the three outcomes below. It exits non-zero on anything but a clean pass.
+>
+> ```sh
+> cd server
+> BASE_URL=$(cd ../terraform && terraform output -raw server_url) \
+> ACCESS_TOKEN=<supabase jwt for a REGISTERED account> \
+> npm run measure:gemini -- --n 30 --image ./label.jpg
+> ```
+
 There is no p99 to read: `dev` serves no traffic and a private prod will not either. Run a synthetic
 batch instead, against `dev` **through its current ALB**, with `PLAUSIBILITY_MODE=gemini` and
 `VISION_MODE=llm`:
