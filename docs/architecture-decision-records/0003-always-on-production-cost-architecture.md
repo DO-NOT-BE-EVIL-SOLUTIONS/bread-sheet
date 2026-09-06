@@ -349,6 +349,40 @@ Record two things, because this run is the only cheap chance at the second:
    peaks above ~75 %, raise the task to 1 GB (~+$3.60/mo) as part of step 2 — cheap against the
    $22/mo the ingress change frees.
 
+> **Step 0a clips this measurement, deliberately.** A call that would have taken 24 s is now aborted
+> at 20 s and answers `503 upstream_timeout`; the raw tail is no longer observable from the client.
+> That is fine — the question is whether the *budget* holds, and the breach count answers it
+> directly. Only if it breaches do you need the true tail, and then the move is to raise
+> `GEMINI_CALL_TIMEOUT_MS`, redeploy, and re-run.
+>
+> Two things that will otherwise waste a run: `apiLimiter` allows 100 req/15 min, so 30 × 2
+> endpoints fits once but a quick re-run will 429; and `extract-label` is behind `requireRegistered`,
+> so an anonymous token returns 403 for every request.
+
+#### Local pre-measurement, 2026-09-07 (**not** the step 0b result)
+
+Run against the docker-compose container, not `dev`: `PLAUSIBILITY_MODE=gemini`, `VISION_MODE=llm`,
+Vertex AI via host ADC, `GOOGLE_CLOUD_LOCATION=global`, one real label photo resized to 1600 px,
+n=30 serial per endpoint.
+
+| endpoint | n | min | median | p90 | max | breaches |
+|---|--:|--:|--:|--:|--:|--:|
+| `upload-image` (plausibility gate) | 20 | 2574 | 3317 | 4997 | **5959** | 0 |
+| `extract-label` (`VISION_MODE=llm`) | 30 | 5325 | 7533 | 9670 | **13810** | 0 |
+
+Two things this establishes and one it does not.
+
+**Establishes:** the 20 s inner budget from 0a is correctly sized — nothing came close to breaching
+it. And **`extract-label` is the binding path**, roughly 2.3× the plausibility gate at the median;
+any further work on this should be aimed there.
+
+**Does not establish:** that the 30 s ceiling is safe. A 13.8 s max at n=30 is already 46 % of that
+ceiling *before* adding the three things local cannot model — 0.25 vCPU Fargate instead of a
+workstation, the WIF token exchange instead of local ADC, and `europe-west1` instead of `global`.
+A tail that reaches 13.8 s in thirty samples will reach further in thirty thousand. This is a
+comfortable pass against 20 s and an uncomfortable one against 30 s, which is precisely the margin
+the ingress decision turns on. Run 0b on `dev` before treating the gate as cleared.
+
 #### Outcomes
 
 * **Max under ~20 s, no breaches** — the budget holds. Proceed with steps 1–6 as written.
