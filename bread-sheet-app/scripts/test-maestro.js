@@ -176,6 +176,17 @@ function resolveAndroidSdk() {
 }
 
 const MIN_JAVA_MAJOR = 17;
+// Upper bound, and it is not optional. Measured on this project (Gradle 9.3.1, RN 0.86):
+//   JDK 26 → 5 failures. AGP's JdkImageTransform runs the JDK's own `jlink` and fails on
+//            every library module ("Execution failed for JdkImageTransform …
+//            core-for-system-modules.jar"), plus both CMake configure tasks.
+//   JDK 25 → 2 failures. jlink is fine; `:react-native-*:configureCMakeDebug` still dies on
+//            "a restricted method in java.lang.System has been called" — the JDK 24+
+//            native-access restriction.
+//   JDK 21 → the newest AGP officially supports, and below the native-access change.
+// A floor-only check waves all of that through: JDK 26 passed `>= 17` happily and then burnt
+// 10m35s on a build that could not succeed, with five errors none of which were about the app.
+const MAX_JAVA_MAJOR = Number(process.env.MAESTRO_MAX_JAVA || 21);
 
 /** Major version from `java -version` output, or null if unparseable. */
 function javaMajorVersion(output) {
@@ -185,6 +196,11 @@ function javaMajorVersion(output) {
   const first = Number(match[1]);
   // 1.8.0_401 → major 8; anything from 9 on puts the major first.
   return first === 1 ? Number(match[2] || 0) : first;
+}
+
+/** Whether a JDK major version is one the Android Gradle Plugin can actually build with. */
+function isUsableJavaMajor(major) {
+  return Number.isInteger(major) && major >= MIN_JAVA_MAJOR && major <= MAX_JAVA_MAJOR;
 }
 
 function resolveJava() {
@@ -204,8 +220,8 @@ function resolveJava() {
       // A JDK that runs but is too old fails 30 minutes later inside Gradle with
       // an unrelated-looking error; reject it here and keep probing instead.
       const major = javaMajorVersion(`${res.stderr}\n${res.stdout}`);
-      if (major !== null && major < MIN_JAVA_MAJOR) {
-        rejected.push(`${java} (Java ${major})`);
+      if (major !== null && !isUsableJavaMajor(major)) {
+        rejected.push(`${java} (Java ${major} — ${major < MIN_JAVA_MAJOR ? 'too old' : 'too new'})`);
         continue;
       }
       return java;
@@ -214,10 +230,13 @@ function resolveJava() {
     }
   }
   fail(
-    `JDK ${MIN_JAVA_MAJOR}+ not found (required for the Gradle build of the debug APK). ` +
-      (rejected.length ? `Too old: ${rejected.join(', ')}. ` : '') +
-      'Set JAVA_HOME or install a JDK (Android Studio ships one at /opt/android-studio/jbr ' +
-      'on Linux).'
+    `No JDK between ${MIN_JAVA_MAJOR} and ${MAX_JAVA_MAJOR} found — the Android Gradle Plugin ` +
+      'needs one in that range to build the debug APK. ' +
+      (rejected.length ? `Rejected: ${rejected.join(', ')}. ` : '') +
+      `Install one (e.g. \`pacman -S jdk21-openjdk\` / \`apt install openjdk-21-jdk\`) and point ` +
+      'JAVA_HOME at it. Note a rolling-release distro and recent Android Studio may both ship a ' +
+      'JDK too new for AGP, so "a JDK is installed" is not the same as "a usable JDK". Override ' +
+      'the ceiling with MAESTRO_MAX_JAVA if your AGP supports a newer one.'
   );
 }
 
@@ -815,5 +834,7 @@ if (require.main === module) {
     teardown,
     waitForBoot,
     MIN_JAVA_MAJOR,
+    MAX_JAVA_MAJOR,
+    isUsableJavaMajor,
   };
 }

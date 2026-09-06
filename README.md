@@ -167,7 +167,8 @@ in `e2e/maestro/`, and tears everything down. Each missing prerequisite exits wi
 message instead of a confusing downstream crash — which is what `MAESTRO_PREREQS_ONLY=1` reports
 in a second rather than mid-build.
 
-Beyond the Playwright suite's requirements you need **JDK 17+** (the Android Studio JBR counts)
+Beyond the Playwright suite's requirements you need a **JDK between 17 and 21** (newer JDKs
+break the Android Gradle Plugin's build — the runner rejects them up front with the reason)
 and an **Android SDK** with `emulator/` and `platform-tools/`, found via `ANDROID_HOME` or a
 standard location such as `~/Android/Sdk`. `cmdline-tools` is needed only to *create* an AVD; an
 existing one is discovered without it. The flows sign in as a guest and look up a product, so

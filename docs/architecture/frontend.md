@@ -513,10 +513,16 @@ config rather than secrets (`EXPO_PUBLIC_*` is inlined into the client bundle,
 which is why CI passes them as repo *variables*), but the same worktree habit
 applied to `server/.env` would be handing over `GEMINI_API_KEY`. Metro inherits the
 runner's environment, so exported values need no further plumbing. Exporting only
-one of the two is a hard error rather than a silent mix with the file. Plus JDK 17+, an
+one of the two is a hard error rather than a silent mix with the file. Plus a JDK in the **17–21** range, an
 Android SDK with a system image and an AVD, and the Maestro CLI; the first Gradle
 run downloads dependencies and can take 10–40 minutes. AVDs are discovered with
 `emulator -list-avds`, which every SDK has — *not* `avdmanager list avd`, which
 lives in cmdline-tools that plenty of Android Studio installs lack; `avdmanager` is
-used only to **create** one. On a machine missing a prerequisite the runner names
+used only to **create** one. The JDK bound is a *range*, not a minimum, and that
+matters on a rolling-release distro: measured against this project (Gradle 9.3.1,
+RN 0.86), JDK 26 fails AGP's `JdkImageTransform` on every library module plus both
+CMake configure tasks, and JDK 25 still fails the CMake tasks on the JDK 24+
+restricted-native-access rule. A floor-only check accepted JDK 26 and spent 10m35s
+on a build that could not succeed. `MAESTRO_MAX_JAVA` raises the ceiling if a newer
+AGP supports it. On a machine missing a prerequisite the runner names
 exactly which one and how to fix it (exit 2).
