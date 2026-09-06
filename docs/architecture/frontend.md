@@ -440,9 +440,10 @@ entry point (`scripts/test-maestro.js`); the reviewer's test matrix runs it
 conditionally for tickets whose diff touches camera/scan code.
 
 The runner resolves **every** prerequisite up front — Android SDK (`ANDROID_HOME`,
-else common install paths), JDK 17+ (`JAVA_HOME`, else the Android Studio JBR,
-version-checked so an old JDK is rejected here rather than 40 minutes later inside
-Gradle), the Maestro CLI, and an AVD — then, and only then, boots and builds:
+else common install paths), a JDK in the **17–21** range (`JAVA_HOME`, then `PATH`, then
+every `java` under `/usr/lib/jvm`, `/usr/lib64/jvm` and `~/.jdks`, then the Android Studio
+JBR — version-checked so an out-of-range JDK is rejected here rather than 10–40 minutes
+later inside Gradle), the Maestro CLI, and an AVD — then, and only then, boots and builds:
 
 1. Boot the emulator headless
    (`-no-window -gpu swiftshader_indirect -camera-back virtualscene`) and wait for
