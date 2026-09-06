@@ -1,0 +1,96 @@
+name: Native E2E (Maestro)
+
+# Separate from the main Tests workflow on purpose: this job boots an Android emulator and
+# runs a Gradle build, so it costs minutes rather than seconds. It runs only when the diff
+# touches the camera/scan surface it covers — the same condition the agentic dev team's
+# reviewer applies (agent-team/src/prompts/guardrails.md, "Native E2E") — plus on demand.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bread-sheet-app/app/(tabs)/scan.tsx'
+      - 'bread-sheet-app/components/manual-barcode-sheet.tsx'
+      - 'bread-sheet-app/features/products/barcode.ts'
+      - 'bread-sheet-app/e2e/maestro/**'
+      - 'bread-sheet-app/scripts/test-maestro.js'
+      - '.github/workflows/test-native-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  maestro:
+    name: Camera & scan flows on an Android emulator
+    # Nested virtualisation for the emulator needs a Linux runner with KVM.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: bread-sheet-app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: bread-sheet-app/package-lock.json
+
+      # A JDK in the 17-21 range: the Android Gradle Plugin's JdkImageTransform runs the JDK's
+      # own jlink and fails on anything newer, and JDK 24+ additionally breaks the CMake
+      # configure tasks via its restricted-native-access rules. scripts/test-maestro.js
+      # enforces the same bound and would reject a newer runner default outright.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro CLI
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('bread-sheet-app/package-lock.json') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      # The runner provisions its own AVD when cmdline-tools are present, which they are on
+      # this image. Supabase config comes from repo *variables*, not secrets: both are
+      # EXPO_PUBLIC_* values Expo bakes into the client bundle, so they are already public —
+      # the same reasoning as the Playwright job in test.yml.
+      - name: Run Maestro flows
+        run: npm run test:maestro
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
+
+      # Screenshots and per-step view hierarchies live in Maestro's own run directory, not in
+      # the repo — the hierarchy JSON is what distinguishes "view was off-screen" from "wrong
+      # testID", which is exactly the failure this suite hit during development.
+      - name: Upload Maestro artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-artifacts
+          path: |
+            ~/.maestro/tests/
+            bread-sheet-app/e2e/maestro/artifacts/
+          retention-days: 14

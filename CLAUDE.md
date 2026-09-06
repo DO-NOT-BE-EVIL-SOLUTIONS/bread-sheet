@@ -20,6 +20,11 @@ npm run ios         # iOS emulator
 npm run android     # Android emulator
 npm run web         # Web browser
 npm run lint        # ESLint
+npm test            # Jest unit tests
+npm run test:e2e    # Playwright E2E against Expo web
+npm run test:maestro  # Native E2E (Maestro on an Android emulator) — camera/scan flows.
+                      # Needs a JDK 17-21, an Android SDK and the Maestro CLI; see README.md.
+                      # MAESTRO_PREREQS_ONLY=1 checks the machine in ~1s without building.
 ```
 
 ### Backend (`server/`)

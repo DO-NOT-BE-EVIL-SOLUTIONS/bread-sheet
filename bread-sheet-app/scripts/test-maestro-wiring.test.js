@@ -36,6 +36,17 @@ function fakeSdkWithAvds(names) {
   return sdk;
 }
 
+/**
+ * Index of a call site, skipping the function declaration of the same name — `indexOf` on a
+ * bare name finds `function foo(` first, which sits above every call and quietly makes any
+ * "X happens after Y" ordering assertion vacuous.
+ */
+function callSiteIndex(src, name) {
+  const re = new RegExp(`^[^\\S\\n]+(?:await\\s+)?${name}\\(`, 'm');
+  const match = re.exec(src);
+  return match ? match.index : -1;
+}
+
 describe('Maestro E2E wiring (TICKET-P9-003)', () => {
   test('package.json exposes the test:maestro script the reviewer runs', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -127,8 +138,11 @@ describe('runner regressions (TICKET-P9-003)', () => {
     // "exit undefined" while the Gradle child kept going orphaned.
     // Asserted on the source, not on `fn.constructor.name`: babel-jest
     // transpiles async functions away when this module is required.
-    expect(RUNNER_SRC).toMatch(/async function buildAndInstallDebug\(/);
-    expect(RUNNER_SRC).toMatch(/await buildAndInstallDebug\(/);
+    expect(RUNNER_SRC).toMatch(/async function assembleDebug\(/);
+    // The build is kicked off before the boot wait and awaited after it, so the two overlap.
+    // Both halves matter: starting it without awaiting would install a half-built APK.
+    expect(RUNNER_SRC).toMatch(/const assembling = assembleDebug\(/);
+    expect(RUNNER_SRC).toMatch(/await assembling;/);
     const unawaited = RUNNER_SRC.split('\n').filter(
       (line) => /(?:^|[^.\w])runStreaming\(/.test(line) && !/await runStreaming\(/.test(line)
         && !/^\s*(?:\*|\/\/)/.test(line) && !/function runStreaming/.test(line)
@@ -142,7 +156,7 @@ describe('runner regressions (TICKET-P9-003)', () => {
     // previous run's guest session then survives and both flows stall on
     // "Continue as Guest". Verified against a booted emulator: `pm clear` on a
     // package that is not installed exits 1 with "Failed".
-    const install = RUNNER_SRC.indexOf('await buildAndInstallDebug(');
+    const install = callSiteIndex(RUNNER_SRC, 'installDebugApk');
     const clear = RUNNER_SRC.indexOf("'pm', 'clear'");
     const grant = RUNNER_SRC.indexOf("'pm', 'grant'");
     expect(install).toBeGreaterThan(-1);
@@ -260,6 +274,74 @@ describe('runner regressions (TICKET-P9-003)', () => {
         path.join(root, 'java-26-openjdk', 'bin', 'java'),
       ]);
     });
+  });
+
+
+  // TICKET-P9-003 — the API-directory match and the Play-Store exclusion are one change,
+  // not two. The old scanner matched /^android-(\d+)$/ and an allowlist that between them
+  // hid `android-37.1/google_apis_playstore_ps16k`. Widening the match without excluding
+  // Play images would make that image selectable — and Maestro's inputText hangs on it
+  // indefinitely (measured: 2m59s timeout, vs seconds on android-35;google_apis).
+  describe('system image selection', () => {
+    function fakeSdk(images) {
+      const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-'));
+      for (const img of images) {
+        fs.mkdirSync(path.join(sdk, 'system-images', ...img.split('/'), 'x86_64'), { recursive: true });
+      }
+      return sdk;
+    }
+
+    test('accepts a dotted API directory, which the old digits-only match skipped', () => {
+      const sdk = fakeSdk(['android-37.1/google_apis']);
+      expect(runner.installedSystemImages(sdk).map((i) => i.image)).toEqual([
+        'system-images;android-37.1;google_apis;x86_64',
+      ]);
+    });
+
+    test('never offers a Play-Store image, whatever its suffix', () => {
+      const sdk = fakeSdk([
+        'android-37.1/google_apis_playstore_ps16k',
+        'android-36/google_apis_playstore',
+      ]);
+      expect(runner.installedSystemImages(sdk)).toEqual([]);
+    });
+
+    test('prefers the newest usable API and ignores Play images beside it', () => {
+      const sdk = fakeSdk([
+        'android-35/google_apis',
+        'android-37.1/google_apis_playstore_ps16k',
+        'android-34/default',
+      ]);
+      expect(runner.installedSystemImages(sdk).map((i) => i.image)).toEqual([
+        'system-images;android-35;google_apis;x86_64',
+        'system-images;android-34;default;x86_64',
+      ]);
+    });
+
+    test('an SDK with no system-images directory is empty, not a crash', () => {
+      expect(runner.installedSystemImages(fs.mkdtempSync(path.join(os.tmpdir(), 'bare-')))).toEqual([]);
+    });
+  });
+
+
+  test('the APK is installed only after the build it came from finished', () => {
+    // assembleDebug runs concurrently with the emulator boot, so the ordering that used to
+    // be implicit in one function is now a real constraint: installing before `await
+    // assembling` would push whatever APK happened to be on disk — silently the previous
+    // build's, since adb install of a stale file succeeds.
+    const awaited = RUNNER_SRC.indexOf('await assembling;');
+    const install = callSiteIndex(RUNNER_SRC, 'installDebugApk');
+    expect(awaited).toBeGreaterThan(-1);
+    expect(install).toBeGreaterThan(awaited);
+  });
+
+  test('the native project is regenerated when the config that produced it changes', () => {
+    // Regenerating only when android/ is absent left a stale native project behind after an
+    // app.json or dependency change, so the suite exercised a build that no longer matched
+    // the source.
+    expect(RUNNER_SRC).toMatch(/function ensureNativeProject\(/);
+    expect(RUNNER_SRC).toMatch(/PREBUILD_STAMP/);
+    expect(RUNNER_SRC).toMatch(/args\.push\('--clean'\)/);
   });
 
 });

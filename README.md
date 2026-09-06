@@ -52,7 +52,7 @@
     ```
 * A free [Supabase](https://supabase.com) project (for auth)
 * For the mobile app: the **Expo Go** app on a physical device, or an emulator
-* *Only for the native E2E suite (`npm run test:maestro`):* **JDK 17+**, an **Android SDK**,
+* *Only for the native E2E suite (`npm run test:maestro`):* a **JDK 17–21**, an **Android SDK**,
   and the [Maestro](https://maestro.mobile.dev) CLI — see [Native E2E](#native-e2e-camera--barcode-scan)
 
 ### 1. Clone the repository

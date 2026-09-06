@@ -2,9 +2,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 /**
  * E2E specs run against Expo web (`npm run web`, i.e. `expo start --web`), not a native
- * emulator — see docs/architecture/agent-dev-team.md for why (no Android SDK on this
- * machine yet; Maestro/Android is a documented follow-up, not built). Needs the same
- * `bread-sheet-app/.env` Supabase config the app normally needs to run — see README.md.
+ * emulator: headless Chromium has no camera, so the scan flows are unreachable here. Those
+ * are covered by the Maestro suite instead (`npm run test:maestro`, TICKET-P9-003) — see
+ * docs/architecture/frontend.md. Needs Supabase config, either exported in the environment
+ * or via `bread-sheet-app/.env` — see README.md.
  */
 export default defineConfig({
   testDir: './e2e',
