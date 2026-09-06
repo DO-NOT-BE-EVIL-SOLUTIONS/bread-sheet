@@ -211,4 +211,34 @@ describe('runner regressions (TICKET-P9-003)', () => {
     });
   });
 
+
+  // TICKET-P9-003 — a floor-only JDK check let JDK 26 through and burnt 10m35s on a Gradle
+  // build that could not succeed (JdkImageTransform/jlink on every library module, plus both
+  // CMake configure tasks). JDK 25 was measured too: jlink fine, CMake still fails on the
+  // JDK 24+ restricted-native-access rule. The bound has to be a range, not a minimum.
+  describe('JDK version acceptance', () => {
+    test('rejects a JDK older than the Gradle build needs', () => {
+      expect(runner.isUsableJavaMajor(11)).toBe(false);
+      expect(runner.isUsableJavaMajor(runner.MIN_JAVA_MAJOR - 1)).toBe(false);
+    });
+
+    test('rejects a JDK too new for the Android Gradle Plugin', () => {
+      expect(runner.isUsableJavaMajor(26)).toBe(false); // observed: 5 Gradle failures
+      expect(runner.isUsableJavaMajor(25)).toBe(false); // observed: 2 CMake failures
+      expect(runner.isUsableJavaMajor(runner.MAX_JAVA_MAJOR + 1)).toBe(false);
+    });
+
+    test('accepts both ends of the supported range', () => {
+      expect(runner.isUsableJavaMajor(runner.MIN_JAVA_MAJOR)).toBe(true);
+      expect(runner.isUsableJavaMajor(runner.MAX_JAVA_MAJOR)).toBe(true);
+    });
+
+    test('parses the major version out of every java -version shape', () => {
+      expect(runner.javaMajorVersion('openjdk version "26.0.2" 2026-07-21')).toBe(26);
+      expect(runner.javaMajorVersion('openjdk version "25.0.2" 2026-01-20')).toBe(25);
+      expect(runner.javaMajorVersion('openjdk version "21.0.3"')).toBe(21);
+      expect(runner.javaMajorVersion('java version "1.8.0_401"')).toBe(8);
+    });
+  });
+
 });
