@@ -158,24 +158,35 @@ function resolveAndroidSdk() {
     process.env.ANDROID_HOME,
     process.env.ANDROID_SDK_ROOT,
     path.join(os.homedir(), 'Android', 'Sdk'),
+    '/usr/local/lib/android/sdk', // GitHub-hosted runners
     '/usr/local/android-sdk',
     '/opt/android-sdk',
     '/opt/android/sdk',
   ].filter(Boolean);
 
+  // A *partial* SDK is the common case and used to report identically to no SDK at all:
+  // GitHub's ubuntu-24.04 image ships platform-tools but no emulator, so "Android SDK not
+  // found" pointed at a directory that plainly existed. Name the missing component instead.
+  const partial = [];
   for (const sdk of candidates) {
-    if (
-      fs.existsSync(path.join(sdk, 'emulator', 'emulator')) &&
-      fs.existsSync(path.join(sdk, 'platform-tools', 'adb'))
-    ) {
-      return sdk;
+    const haveEmulator = fs.existsSync(path.join(sdk, 'emulator', 'emulator'));
+    const haveAdb = fs.existsSync(path.join(sdk, 'platform-tools', 'adb'));
+    if (haveEmulator && haveAdb) return sdk;
+    if (haveEmulator || haveAdb) {
+      const missing = haveAdb ? 'emulator' : 'platform-tools';
+      const present = haveAdb ? 'platform-tools' : 'emulator';
+      partial.push(`${sdk} (has ${present}, missing ${missing})`);
     }
   }
   fail(
-    'Android SDK not found. Set ANDROID_HOME (needs emulator/ and platform-tools/, ' +
-      'e.g. ~/Android/Sdk from Android Studio). Install with ' +
-      '`sdkmanager "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"` ' +
-      'or via Android Studio → SDK Manager.'
+    partial.length
+      ? `Android SDK is incomplete: ${partial.join('; ')}. Install the missing package with ` +
+          '`sdkmanager "emulator" "platform-tools"` — CI images commonly ship the SDK and ' +
+          'platform-tools without the emulator.'
+      : 'Android SDK not found. Set ANDROID_HOME (needs emulator/ and platform-tools/, ' +
+          'e.g. ~/Android/Sdk from Android Studio). Install with ' +
+          '`sdkmanager "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"` ' +
+          'or via Android Studio → SDK Manager.'
   );
 }
 

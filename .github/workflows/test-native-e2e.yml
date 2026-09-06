@@ -54,6 +54,22 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # ubuntu-24.04 ships the SDK, cmdline-tools and platform-tools but NOT the emulator,
+      # and no system image — so scripts/test-maestro.js correctly refuses to start. Install
+      # the two packages it needs; it provisions the AVD itself from there. `yes |` covers the
+      # licence prompts, and sdkmanager writes progress to stdout unconditionally, hence the
+      # filtering — a full progress dump is thousands of lines of carriage returns.
+      - name: Install Android emulator and system image
+        run: |
+          set -o pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER" || { echo "sdkmanager not found at $SDKMANAGER"; exit 1; }
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" \
+            | grep -viE '^\[=*>? *\]|^$' || true
+          test -x "$ANDROID_HOME/emulator/emulator" || { echo "emulator still missing"; exit 1; }
+          echo "emulator: $("$ANDROID_HOME/emulator/emulator" -version | head -1)"
+
       - name: Install dependencies
         run: npm ci
 
