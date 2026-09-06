@@ -19,6 +19,13 @@ on:
 permissions:
   contents: read
 
+# An emulator run costs minutes; a rapid second push should supersede the first rather than
+# race it. Never cancel on main, where a completed run is what populates the caches below for
+# every branch cut from it.
+concurrency:
+  group: native-e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   maestro:
     name: Camera & scan flows on an Android emulator
@@ -54,6 +61,21 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # The emulator package and system image are ~1 GB and the Gradle cache does not cover
+      # them, so without this every run re-downloads them. Keyed on the image coordinates: a
+      # different API or flavour must miss, since booting the wrong image is exactly the
+      # failure this suite hit during development (Play-Store images hang Maestro's inputText).
+      # ~/.android/avd rides along so the AVD survives too; the runner wipes app data after
+      # install and both flows launch with clearState, so inherited userdata cannot leak in.
+      - name: Cache Android emulator, system image and AVD
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/emulator
+            ${{ env.ANDROID_HOME }}/system-images/android-35/google_apis/x86_64
+            ~/.android/avd
+          key: android-emu-${{ runner.os }}-api35-google_apis-x86_64-v1
+
       # ubuntu-24.04 ships the SDK, cmdline-tools and platform-tools but NOT the emulator,
       # and no system image — so scripts/test-maestro.js correctly refuses to start. Install
       # the two packages it needs; it provisions the AVD itself from there. `yes |` covers the
@@ -62,12 +84,21 @@ jobs:
       - name: Install Android emulator and system image
         run: |
           set -o pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          test -x "$SDKMANAGER" || { echo "sdkmanager not found at $SDKMANAGER"; exit 1; }
-          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" \
-            | grep -viE '^\[=*>? *\]|^$' || true
+          IMAGE_DIR="$ANDROID_HOME/system-images/android-35/google_apis/x86_64"
+          # Checked on disk rather than on the cache step's hit/miss output: a partial restore
+          # should re-download, and scripts/test-maestro.js scans this directory directly, so
+          # what matters is whether the files are here — not whether a cache key matched.
+          if [ -x "$ANDROID_HOME/emulator/emulator" ] && [ -d "$IMAGE_DIR" ]; then
+            echo "emulator and system image restored from cache — skipping download"
+          else
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            test -x "$SDKMANAGER" || { echo "sdkmanager not found at $SDKMANAGER"; exit 1; }
+            yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+            "$SDKMANAGER" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" \
+              | grep -viE '^\[=*>? *\]|^$' || true
+          fi
           test -x "$ANDROID_HOME/emulator/emulator" || { echo "emulator still missing"; exit 1; }
+          test -d "$IMAGE_DIR" || { echo "system image still missing at $IMAGE_DIR"; exit 1; }
           echo "emulator: $("$ANDROID_HOME/emulator/emulator" -version | head -1)"
 
       - name: Install dependencies
