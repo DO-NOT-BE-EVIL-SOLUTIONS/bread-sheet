@@ -35,6 +35,12 @@ appId: com.breadsheetexpo.breadsheet
 - tapOn:
     id: "manual-barcode-input"
 - inputText: "4006381333931"
+# Dismiss the soft keyboard before reaching for the button. The sheet's submit
+# control sits below the input, so an open IME pushes it off-screen — and an
+# off-screen view is absent from the hierarchy entirely, not merely covered, so
+# Maestro reports "Element not found: manual-barcode-submit" rather than a
+# tap that missed. Observed on API 35 with the Gboard IME up.
+- hideKeyboard
 - tapOn:
     id: "manual-barcode-submit"
 # Same falsifiable landing assertion as barcode-scan.yaml — and here it matters
