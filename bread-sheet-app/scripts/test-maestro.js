@@ -53,6 +53,19 @@ const METRO_TIMEOUT_MS = Number(process.env.MAESTRO_METRO_TIMEOUT_MS || 2 * 60 *
 const GRADLE_TIMEOUT_MS = Number(process.env.MAESTRO_GRADLE_TIMEOUT_MS || 40 * 60 * 1000);
 
 const AVD_NAME = process.env.MAESTRO_AVD || DEFAULT_AVD;
+/**
+ * Where AVDs live, pinned for every tool that touches them. Read per call, not captured at
+ * import, so ANDROID_AVD_HOME stays a live override.
+ *
+ * `avdmanager` and `emulator` do NOT agree on where to look by default: avdmanager writes to
+ * $ANDROID_SDK_HOME/.android/avd while the emulator searches $ANDROID_SDK_HOME/avd, so on any
+ * machine with ANDROID_SDK_HOME set (GitHub's hosted runners among them) creation reports
+ * success and the boot then fails with "Unknown AVD name". Both consult ANDROID_AVD_HOME
+ * first, so setting it explicitly makes them agree.
+ */
+function avdHome() {
+  return process.env.ANDROID_AVD_HOME || path.join(os.homedir(), '.android', 'avd');
+}
 const FLOWS_DIR = path.join(ROOT, 'e2e', 'maestro');
 const ARTIFACTS_DIR = path.join(FLOWS_DIR, 'artifacts');
 const ENV_FILE = path.join(ROOT, '.env');
@@ -488,7 +501,9 @@ function installedSystemImages(sdk) {
 function listExistingAvds(sdk) {
   const names = new Set();
   try {
-    const { status, stdout } = runSync(path.join(sdk, 'emulator', 'emulator'), ['-list-avds']);
+    const { status, stdout } = runSync(path.join(sdk, 'emulator', 'emulator'), ['-list-avds'], {
+      env: { ANDROID_AVD_HOME: avdHome() },
+    });
     if (status === 0) {
       for (const line of stdout.split('\n')) {
         const name = line.trim();
@@ -502,10 +517,8 @@ function listExistingAvds(sdk) {
 
   // Secondary source: the AVD home directory. Covers an emulator binary that
   // refuses to run (e.g. missing KVM permissions) but a perfectly listable AVD.
-  const avdHome =
-    process.env.ANDROID_AVD_HOME || path.join(os.homedir(), '.android', 'avd');
   try {
-    for (const entry of fs.readdirSync(avdHome)) {
+    for (const entry of fs.readdirSync(avdHome())) {
       if (entry.endsWith('.ini')) names.add(entry.slice(0, -'.ini'.length));
     }
   } catch {
@@ -523,7 +536,10 @@ function listExistingAvds(sdk) {
  */
 function ensureAvd(sdk, javaHome) {
   const avdmanager = findAvdmanager(sdk);
-  const toolEnv = javaHome ? { JAVA_HOME: javaHome } : {};
+  // Every AVD tool gets the same home — see avdHome(). Creating it up front matters on a
+  // fresh machine: avdmanager will happily create the AVD elsewhere if this path is absent.
+  fs.mkdirSync(avdHome(), { recursive: true });
+  const toolEnv = { ANDROID_AVD_HOME: avdHome(), ...(javaHome ? { JAVA_HOME: javaHome } : {}) };
   const existing = listExistingAvds(sdk);
 
   // Reuse the requested AVD if it already exists (the "no per-run setup" happy
@@ -642,7 +658,7 @@ function openLogFd(name) {
 
 function bootEmulator(sdk, avd) {
   const emulator = path.join(sdk, 'emulator', 'emulator');
-  log(`booting emulator "-avd ${avd}" (headless)…`);
+  log(`booting emulator "-avd ${avd}" (headless) from ${avdHome()}…`);
 
   const args = [
     '-avd', avd,
@@ -659,6 +675,10 @@ function bootEmulator(sdk, avd) {
   const child = spawn(emulator, args, {
     detached: true,
     stdio: ['ignore', logFd, logFd],
+    // Same AVD home the AVD was created in. Inheriting the ambient environment is what let
+    // avdmanager and the emulator disagree: creation succeeded, the boot then reported
+    // "Unknown AVD name [breadsheet-e2e]" and sat there until the boot timeout.
+    env: { ...process.env, ANDROID_AVD_HOME: avdHome() },
   });
   child.unref();
   return child;

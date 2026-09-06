@@ -378,4 +378,26 @@ describe('runner regressions (TICKET-P9-003)', () => {
     });
   });
 
+
+  // TICKET-P9-003 — avdmanager writes to $ANDROID_SDK_HOME/.android/avd while the emulator
+  // searches $ANDROID_SDK_HOME/avd, so on a machine with ANDROID_SDK_HOME set (GitHub's
+  // hosted runners) creation reported success and the boot failed with "Unknown AVD name",
+  // then sat until the boot timeout. Both honour ANDROID_AVD_HOME first, so every tool that
+  // touches an AVD must be handed the same one.
+  describe('AVD home is pinned for every tool', () => {
+    test('creation, listing and boot all pass ANDROID_AVD_HOME', () => {
+      expect(RUNNER_SRC).toMatch(/function avdHome\(\)/);
+      // avdmanager (via toolEnv), `emulator -list-avds`, and the boot spawn.
+      const uses = RUNNER_SRC.match(/ANDROID_AVD_HOME: avdHome\(\)/g) || [];
+      expect(uses.length).toBeGreaterThanOrEqual(3);
+    });
+
+    test('the AVD home is created before avdmanager runs', () => {
+      const mkdir = RUNNER_SRC.indexOf('fs.mkdirSync(avdHome()');
+      const create = RUNNER_SRC.indexOf('create avd');
+      expect(mkdir).toBeGreaterThan(-1);
+      expect(create).toBeGreaterThan(mkdir);
+    });
+  });
+
 });
