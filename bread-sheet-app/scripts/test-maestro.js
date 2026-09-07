@@ -861,6 +861,13 @@ async function assembleDebug(sdk, java, abi) {
   // `await` is load-bearing: runStreaming returns a Promise, so reading `.code` off the
   // unresolved Promise made every run abort with "exit undefined" while Gradle kept going.
   const gradleArgs = [':app:assembleDebug', '-x', 'lint'];
+  // A Gradle daemon is worth keeping on a developer machine — it is why a warm build here is
+  // seconds — and worthless on CI, where the VM is discarded straight afterwards. Deliberately
+  // NOT `gradlew --stop` in teardown: that kills every daemon for this Gradle version,
+  // including the ones the developer's IDE is using. Gradle reuses one idle daemon across
+  // runs rather than stacking them (verified with `gradlew --status`); the memory pressure
+  // seen during this ticket came from two daemons for two different JDKs, not from a leak.
+  if (process.env.CI) gradleArgs.push('--no-daemon');
   if (abi) {
     gradleArgs.push(`-PreactNativeArchitectures=${abi}`);
     log(`building for ${abi} only — the ABI this AVD runs`);
