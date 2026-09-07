@@ -47,6 +47,14 @@ function callSiteIndex(src, name) {
   return match ? match.index : -1;
 }
 
+/**
+ * Source with comments removed. A guard that greps raw source matches its own explanatory
+ * comments — the `--stop` check below failed against a comment saying why --stop is wrong.
+ */
+function codeOnly(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
 describe('Maestro E2E wiring (TICKET-P9-003)', () => {
   test('package.json exposes the test:maestro script the reviewer runs', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -456,6 +464,17 @@ describe('runner regressions (TICKET-P9-003)', () => {
       expect(RUNNER_SRC).toMatch(/-PreactNativeArchitectures=\$\{abi\}/);
       const guarded = /if \(abi\) \{[\s\S]{0,200}-PreactNativeArchitectures/.test(RUNNER_SRC);
       expect(guarded).toBe(true);
+    });
+  });
+
+
+  // TICKET-P9-003 — a daemon is valuable locally (warm builds in seconds) and pointless on a
+  // CI VM that is discarded straight after. `gradlew --stop` was rejected as the fix: it kills
+  // every daemon for the Gradle version, including a developer's IDE ones.
+  describe('Gradle daemon policy', () => {
+    test('the daemon is disabled on CI only, and never via --stop', () => {
+      expect(RUNNER_SRC).toMatch(/if \(process\.env\.CI\) gradleArgs\.push\('--no-daemon'\)/);
+      expect(codeOnly(RUNNER_SRC)).not.toMatch(/--stop/);
     });
   });
 
