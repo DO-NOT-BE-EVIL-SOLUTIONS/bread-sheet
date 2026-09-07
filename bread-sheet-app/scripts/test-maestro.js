@@ -545,62 +545,97 @@ function listExistingAvds(sdk) {
 const KNOWN_ABIS = ['x86_64', 'x86', 'arm64-v8a', 'armeabi-v7a'];
 
 /**
- * Where an AVD's config.ini records its ABI, most precise first.
+ * An Android .ini file as key → value, or null when there is no readable file.
  *
- * `abi.type` is the obvious key and cannot be relied on alone: the copy restored from CI's
- * cache has no such line, while a freshly created one does. `image.sysdir.1` is the better
- * fallback of the remaining two because its last path segment is the ABI spelled exactly as
- * Gradle wants it; `hw.cpu.arch` is coarser ("arm64", not "arm64-v8a") and needs mapping.
+ * Split on the first `=` rather than matched with a `^key=(.+)$` pattern per key, because the
+ * two writers that touch these files disagree on spacing: `avdmanager` writes `abi.type=x86_64`
+ * when it creates the AVD, while the emulator's own INI writer pads it — `hw.cpu.arch = x86_64`,
+ * as any booted AVD's hardware-qemu.ini shows. An unpadded pattern reads the freshly created
+ * config and silently misses a rewritten one, which is what made the cache-restored AVD on CI
+ * report no ABI at all and fall back to building every architecture. Trimming both halves
+ * accepts either spelling, and drops a trailing \r for free.
+ */
+function readIni(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  const values = new Map();
+  for (const line of text.split('\n')) {
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    // First writing wins: these files are appended to, never rewritten in place.
+    if (key && !key.startsWith('#') && !values.has(key)) values.set(key, line.slice(eq + 1).trim());
+  }
+  return values;
+}
+
+/** `hw.cpu.arch` is coarser than Gradle's spelling ("arm64", not "arm64-v8a"). */
+const CPU_ARCH_TO_ABI = { x86_64: 'x86_64', x86: 'x86', arm64: 'arm64-v8a', arm: 'armeabi-v7a' };
+
+/**
+ * Where an AVD records its ABI, most precise first.
+ *
+ * `abi.type` is the obvious key and cannot be relied on alone. `image.sysdir.1` is the better
+ * fallback of the config keys because its last path segment is the ABI spelled exactly as
+ * Gradle wants it. `hardware-qemu.ini` is last and matters most for CI: the emulator writes it
+ * on every boot, so it is always present in an AVD restored from cache — the one case where
+ * config.ini has proven unreliable.
  */
 const ABI_SOURCES = [
-  { key: 'abi.type', parse: (value) => value },
-  { key: 'image.sysdir.1', parse: (value) => value.replace(/\/+$/, '').split('/').pop() },
+  { file: 'config.ini', key: 'abi.type', parse: (value) => value },
   {
-    key: 'hw.cpu.arch',
-    parse: (value) =>
-      ({ x86_64: 'x86_64', x86: 'x86', arm64: 'arm64-v8a', arm: 'armeabi-v7a' })[value] || null,
+    file: 'config.ini',
+    key: 'image.sysdir.1',
+    parse: (value) => value.replace(/\/+$/, '').split('/').pop(),
   },
+  { file: 'config.ini', key: 'hw.cpu.arch', parse: (value) => CPU_ARCH_TO_ABI[value] || null },
+  { file: 'hardware-qemu.ini', key: 'hw.cpu.arch', parse: (value) => CPU_ARCH_TO_ABI[value] || null },
 ];
 
 function avdAbi(name) {
   const home = avdHome();
   let dir = path.join(home, `${name}.avd`);
-  const pointerPath = path.join(home, `${name}.ini`);
-  try {
-    // The .ini beside the .avd directory may point somewhere else entirely.
-    const pointer = fs.readFileSync(pointerPath, 'utf8');
-    const match = /^path=(.+)$/m.exec(pointer);
-    if (match) dir = match[1].trim();
-  } catch {
-    // no pointer file — fall back to the conventional location
-  }
+  // The .ini beside the .avd directory may point somewhere else entirely.
+  const pointed = readIni(path.join(home, `${name}.ini`))?.get('path');
+  if (pointed) dir = pointed;
 
-  const configPath = path.join(dir, 'config.ini');
-  let config;
-  try {
-    config = fs.readFileSync(configPath, 'utf8');
-  } catch {
-    warn(`could not read the ABI of AVD "${name}" — no readable config at ${configPath} ` +
-      `(pointer checked at ${pointerPath})`);
-    return null;
-  }
+  const parsed = new Map();
+  const read = (file) => {
+    if (!parsed.has(file)) parsed.set(file, readIni(path.join(dir, file)));
+    return parsed.get(file);
+  };
 
-  const missing = [];
-  for (const { key, parse } of ABI_SOURCES) {
-    const match = new RegExp(`^${key.replace(/\./g, '\\.')}=(.+)$`, 'm').exec(config);
-    if (!match) {
-      missing.push(key);
+  const tried = [];
+  for (const { file, key, parse } of ABI_SOURCES) {
+    const ini = read(file);
+    if (!ini) {
+      tried.push(`${file} (unreadable)`);
       continue;
     }
-    const abi = parse(match[1].trim());
+    const raw = ini.get(key);
+    if (raw === undefined) {
+      tried.push(`${file}:${key} (absent)`);
+      continue;
+    }
+    const abi = parse(raw);
     if (abi && KNOWN_ABIS.includes(abi)) return abi;
-    missing.push(`${key} (unrecognised value "${match[1].trim()}")`);
+    tried.push(`${file}:${key}="${raw}" (unrecognised)`);
   }
 
-  // Reported rather than swallowed: this fell back silently on CI, and the fallback builds
-  // every architecture — correct, but several times slower, and indistinguishable from
-  // success in a green run.
-  warn(`could not read the ABI of AVD "${name}" from ${configPath} — tried ${missing.join(', ')}`);
+  // Reported rather than swallowed, and with the keys the config *does* carry: this fell back
+  // silently on CI, and the fallback builds every architecture — correct, but several times
+  // slower, and indistinguishable from success in a green run. The key sample is what makes a
+  // repeat failure diagnosable from the CI log alone, without another round-trip.
+  const config = read('config.ini');
+  const sample = config ? ` — config.ini carries ${[...config.keys()].slice(0, 8).join(', ')}` : '';
+  warn(
+    `could not read the ABI of AVD "${name}" in ${dir}: ` +
+      `${[...new Set(tried)].join(', ')}${sample}`
+  );
   return null;
 }
 

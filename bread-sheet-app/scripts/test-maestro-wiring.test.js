@@ -479,10 +479,10 @@ describe('runner regressions (TICKET-P9-003)', () => {
   });
 
 
-  // TICKET-P9-003 — abi.type is not always present. The AVD restored from CI's cache has no
-  // such line while a freshly created one does, so relying on that single key silently
-  // disabled the single-ABI build (correct, ~3x slower, and green either way). Derive from
-  // whichever key the config actually carries.
+  // TICKET-P9-003 — the AVD restored from CI's cache read as ABI-less while a freshly created
+  // one read fine, which silently disabled the single-ABI build (correct, ~3x slower, and
+  // green either way). The config is not missing the keys: it is written by a different
+  // writer, one that pads the separator. Parse tolerantly, and consult more than one key.
   describe('target ABI derivation', () => {
     const saved = process.env.ANDROID_AVD_HOME;
     afterEach(() => {
@@ -526,6 +526,46 @@ describe('runner regressions (TICKET-P9-003)', () => {
     test('never returns a value Gradle would not accept', () => {
       avdWithConfig('abi.type=nonsense\nhw.cpu.arch=also-nonsense\n');
       expect(runner.avdAbi('emu')).toBeNull();
+    });
+
+    // TICKET-P9-003 — the actual reason CI's restored AVD read as ABI-less. `avdmanager`
+    // writes `abi.type=x86_64`; the emulator's own INI writer pads the separator, which a
+    // `^key=(.+)$` pattern does not match. Compare any booted AVD's hardware-qemu.ini.
+    test('accepts the padded separator the emulator writes', () => {
+      avdWithConfig('PlayStore.enabled = no\nabi.type = x86_64\n');
+      expect(runner.avdAbi('emu')).toBe('x86_64');
+    });
+
+    test('accepts a padded image.sysdir.1 too', () => {
+      avdWithConfig('image.sysdir.1 = system-images/android-35/google_apis/arm64-v8a/\n');
+      expect(runner.avdAbi('emu')).toBe('arm64-v8a');
+    });
+
+    // The emulator writes hardware-qemu.ini on every boot, so it is always present in an AVD
+    // restored from CI's cache — the one case where config.ini has proven unreliable.
+    test('falls back to hardware-qemu.ini when config.ini carries no ABI at all', () => {
+      const home = avdWithConfig('tag.id=google_apis\ntarget=android-35\n');
+      fs.writeFileSync(
+        path.join(home, 'emu.avd', 'hardware-qemu.ini'),
+        'hw.cpu.arch = x86_64\nhw.cpu.ncore = 4\n'
+      );
+      expect(runner.avdAbi('emu')).toBe('x86_64');
+    });
+
+    // A silent fallback cost a full extra build before it was noticed; a repeat has to be
+    // diagnosable from the CI log alone, without another round-trip.
+    test('names the keys the config does carry when it gives up', () => {
+      avdWithConfig('tag.id=google_apis\ntarget=android-35\n');
+      const warnings = [];
+      const spy = jest
+        .spyOn(console, 'warn')
+        .mockImplementation((...args) => warnings.push(args.join(' ')));
+      try {
+        expect(runner.avdAbi('emu')).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
+      expect(warnings.join('\n')).toMatch(/tag\.id, target/);
     });
   });
 
