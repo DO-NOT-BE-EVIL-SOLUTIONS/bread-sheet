@@ -377,10 +377,12 @@ describe('runner regressions (TICKET-P9-003)', () => {
       // The sequential branch awaits assembleDebug directly; the parallel one awaits the
       // pending promise. Either way the install must follow, or a stale APK gets pushed.
       expect(RUNNER_SRC).toMatch(/await assembling;/);
-      expect(RUNNER_SRC).toMatch(/await assembleDebug\(sdk, java\);/);
+      // Matched on the call, not its argument list — the signature gained a target-ABI
+      // parameter and the ordering property this guards is unrelated to it.
+      expect(RUNNER_SRC).toMatch(/await assembleDebug\(/);
       const install = callSiteIndex(RUNNER_SRC, 'installDebugApk');
       expect(install).toBeGreaterThan(RUNNER_SRC.indexOf('await assembling;'));
-      expect(install).toBeGreaterThan(RUNNER_SRC.indexOf('await assembleDebug(sdk, java);'));
+      expect(install).toBeGreaterThan(RUNNER_SRC.indexOf('await assembleDebug('));
     });
   });
 
@@ -403,6 +405,57 @@ describe('runner regressions (TICKET-P9-003)', () => {
       const create = RUNNER_SRC.indexOf('create avd');
       expect(mkdir).toBeGreaterThan(-1);
       expect(create).toBeGreaterThan(mkdir);
+    });
+  });
+
+
+  // TICKET-P9-003 — RN builds all four ABIs by default; an emulator runs one. Building only
+  // the ABI we are about to boot is the largest saving available (a cold CI build measured
+  // 16m46s with all four). It must be *derived*: ensureAvd falls back to whatever AVD exists,
+  // so on an ARM host that is arm64-v8a, and a hardcoded x86_64 APK would install and then
+  // crash for want of native libraries.
+  describe('target ABI', () => {
+    const saved = process.env.ANDROID_AVD_HOME;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.ANDROID_AVD_HOME;
+      else process.env.ANDROID_AVD_HOME = saved;
+    });
+
+    function fakeAvd(name, abi, { pointerTo = null } = {}) {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'avds-'));
+      const dir = pointerTo || path.join(home, `${name}.avd`);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'config.ini'), `hw.cpu.arch=x86_64\nabi.type=${abi}\n`);
+      if (pointerTo) fs.writeFileSync(path.join(home, `${name}.ini`), `path=${pointerTo}\n`);
+      process.env.ANDROID_AVD_HOME = home;
+      return home;
+    }
+
+    test('reads abi.type from the AVD that will boot', () => {
+      fakeAvd('emu', 'x86_64');
+      expect(runner.avdAbi('emu')).toBe('x86_64');
+    });
+
+    test('reports arm64 for an arm64 AVD rather than assuming x86_64', () => {
+      fakeAvd('emu', 'arm64-v8a');
+      expect(runner.avdAbi('emu')).toBe('arm64-v8a');
+    });
+
+    test('follows the .ini pointer when the AVD lives elsewhere', () => {
+      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'elsewhere-'));
+      fakeAvd('emu', 'x86', { pointerTo: elsewhere });
+      expect(runner.avdAbi('emu')).toBe('x86');
+    });
+
+    test('returns null when it cannot tell, so the build covers every ABI', () => {
+      fakeAvd('emu', 'x86_64');
+      expect(runner.avdAbi('missing')).toBeNull();
+    });
+
+    test('the flag is passed only when the ABI is known', () => {
+      expect(RUNNER_SRC).toMatch(/-PreactNativeArchitectures=\$\{abi\}/);
+      const guarded = /if \(abi\) \{[\s\S]{0,200}-PreactNativeArchitectures/.test(RUNNER_SRC);
+      expect(guarded).toBe(true);
     });
   });
 

@@ -529,6 +529,40 @@ function listExistingAvds(sdk) {
 }
 
 /**
+ * The CPU ABI of an AVD, read from its own config.
+ *
+ * React Native builds every ABI in gradle.properties' reactNativeArchitectures by default
+ * (armeabi-v7a, arm64-v8a, x86, x86_64) — four CMake/NDK compilations of every native module,
+ * of which an emulator can execute exactly one. Building only the ABI we are about to boot is
+ * the single biggest saving available here: a cold CI build measured 16m46s with all four.
+ *
+ * Derived, never assumed. ensureAvd() falls back to whatever AVD exists when its preferred one
+ * is absent, so on an ARM host that is arm64-v8a; hardcoding x86_64 would produce an APK with
+ * no usable native libraries, which installs happily and then crashes on launch. When the ABI
+ * cannot be read we build all of them: slow and correct beats fast and broken.
+ */
+function avdAbi(name) {
+  const home = avdHome();
+  let dir = path.join(home, `${name}.avd`);
+  try {
+    // The .ini beside the .avd directory may point somewhere else entirely.
+    const pointer = fs.readFileSync(path.join(home, `${name}.ini`), 'utf8');
+    const match = /^path=(.+)$/m.exec(pointer);
+    if (match) dir = match[1].trim();
+  } catch {
+    // no pointer file — fall back to the conventional location
+  }
+  try {
+    const config = fs.readFileSync(path.join(dir, 'config.ini'), 'utf8');
+    const match = /^abi\.type=(.+)$/m.exec(config);
+    if (match) return match[1].trim();
+  } catch {
+    // unreadable config — caller builds every ABI
+  }
+  return null;
+}
+
+/**
  * Returns the name of the AVD to boot, creating one if necessary. `javaHome` is
  * passed through to avdmanager/sdkmanager — both are java launchers and would
  * fail with a bare "java not found" on machines where the JDK is only reachable
@@ -796,7 +830,7 @@ function gradleEnv(sdk, java) {
  * overlap. `installDebug` would drag the whole build in behind the boot for no reason — the
  * emulator used to sit idle for the entire Gradle run, competing for CPU and RAM with it.
  */
-async function assembleDebug(sdk, java) {
+async function assembleDebug(sdk, java, abi) {
   ensureNativeProject();
 
   const gradlew = path.join(ANDROID_DIR, 'gradlew');
@@ -816,7 +850,14 @@ async function assembleDebug(sdk, java) {
   );
   // `await` is load-bearing: runStreaming returns a Promise, so reading `.code` off the
   // unresolved Promise made every run abort with "exit undefined" while Gradle kept going.
-  const res = await runStreaming(gradlew, [':app:assembleDebug', '-x', 'lint'], {
+  const gradleArgs = [':app:assembleDebug', '-x', 'lint'];
+  if (abi) {
+    gradleArgs.push(`-PreactNativeArchitectures=${abi}`);
+    log(`building for ${abi} only — the ABI this AVD runs`);
+  } else {
+    warn('could not read the AVD\'s ABI — building every architecture, which is much slower');
+  }
+  const res = await runStreaming(gradlew, gradleArgs, {
     cwd: ANDROID_DIR,
     env: gradleEnv(sdk, java),
     timeoutMs: GRADLE_TIMEOUT_MS,
@@ -916,14 +957,17 @@ async function main() {
     // compiling. Observed on a 2-vCPU GitHub runner — "emulator did not attach to adb within
     // 300s" with Kotlin tasks still printing after teardown. So overlap only where there are
     // cores to spare, and otherwise build first and boot into an idle machine.
+    // Read before anything boots: the APK must match the device it will be installed on.
+    const targetAbi = avdAbi(avd);
+
     if (canOverlapBuildAndBoot()) {
       emulatorChild = bootEmulator(sdk, avd);
-      const assembling = assembleDebug(sdk, java);
+      const assembling = assembleDebug(sdk, java, targetAbi);
       serial = waitForBoot(sdk, preexistingSerials);
       await assembling;
     } else {
       log(`${cpuCount()} usable CPU(s) — building first, then booting (no overlap)`);
-      await assembleDebug(sdk, java);
+      await assembleDebug(sdk, java, targetAbi);
       emulatorChild = bootEmulator(sdk, avd);
       serial = waitForBoot(sdk, preexistingSerials);
     }
@@ -1040,6 +1084,7 @@ if (require.main === module) {
     waitForBoot,
     MIN_JAVA_MAJOR,
     MAX_JAVA_MAJOR,
+    avdAbi,
     isUsableJavaMajor,
     installedSystemImages,
     systemJavaCandidates,
