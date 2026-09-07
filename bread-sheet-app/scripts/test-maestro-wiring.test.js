@@ -478,4 +478,55 @@ describe('runner regressions (TICKET-P9-003)', () => {
     });
   });
 
+
+  // TICKET-P9-003 — abi.type is not always present. The AVD restored from CI's cache has no
+  // such line while a freshly created one does, so relying on that single key silently
+  // disabled the single-ABI build (correct, ~3x slower, and green either way). Derive from
+  // whichever key the config actually carries.
+  describe('target ABI derivation', () => {
+    const saved = process.env.ANDROID_AVD_HOME;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.ANDROID_AVD_HOME;
+      else process.env.ANDROID_AVD_HOME = saved;
+    });
+
+    function avdWithConfig(body, name = 'emu') {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'abi-'));
+      fs.mkdirSync(path.join(home, `${name}.avd`), { recursive: true });
+      fs.writeFileSync(path.join(home, `${name}.avd`, 'config.ini'), body);
+      process.env.ANDROID_AVD_HOME = home;
+      return home;
+    }
+
+    test('prefers abi.type when present', () => {
+      avdWithConfig('abi.type=x86_64\nhw.cpu.arch=arm64\n');
+      expect(runner.avdAbi('emu')).toBe('x86_64');
+    });
+
+    test('falls back to image.sysdir.1 — the shape CI restores from cache', () => {
+      avdWithConfig('hw.cpu.arch=x86_64\nimage.sysdir.1=system-images/android-35/google_apis/x86_64/\n');
+      expect(runner.avdAbi('emu')).toBe('x86_64');
+    });
+
+    test('image.sysdir.1 yields the Gradle spelling for arm, not the coarse one', () => {
+      avdWithConfig('image.sysdir.1=system-images/android-35/google_apis/arm64-v8a/\n');
+      expect(runner.avdAbi('emu')).toBe('arm64-v8a');
+    });
+
+    test('maps hw.cpu.arch when it is the only source', () => {
+      avdWithConfig('hw.cpu.arch=arm64\n');
+      expect(runner.avdAbi('emu')).toBe('arm64-v8a');
+    });
+
+    test('returns null when no source is usable, so every ABI is built', () => {
+      avdWithConfig('tag.id=google_apis\n');
+      expect(runner.avdAbi('emu')).toBeNull();
+    });
+
+    test('never returns a value Gradle would not accept', () => {
+      avdWithConfig('abi.type=nonsense\nhw.cpu.arch=also-nonsense\n');
+      expect(runner.avdAbi('emu')).toBeNull();
+    });
+  });
+
 });

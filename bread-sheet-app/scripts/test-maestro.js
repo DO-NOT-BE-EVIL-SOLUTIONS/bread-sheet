@@ -541,12 +541,31 @@ function listExistingAvds(sdk) {
  * no usable native libraries, which installs happily and then crashes on launch. When the ABI
  * cannot be read we build all of them: slow and correct beats fast and broken.
  */
+/** ABIs Gradle accepts in reactNativeArchitectures, and the only values avdAbi may return. */
+const KNOWN_ABIS = ['x86_64', 'x86', 'arm64-v8a', 'armeabi-v7a'];
+
+/**
+ * Where an AVD's config.ini records its ABI, most precise first.
+ *
+ * `abi.type` is the obvious key and cannot be relied on alone: the copy restored from CI's
+ * cache has no such line, while a freshly created one does. `image.sysdir.1` is the better
+ * fallback of the remaining two because its last path segment is the ABI spelled exactly as
+ * Gradle wants it; `hw.cpu.arch` is coarser ("arm64", not "arm64-v8a") and needs mapping.
+ */
+const ABI_SOURCES = [
+  { key: 'abi.type', parse: (value) => value },
+  { key: 'image.sysdir.1', parse: (value) => value.replace(/\/+$/, '').split('/').pop() },
+  {
+    key: 'hw.cpu.arch',
+    parse: (value) =>
+      ({ x86_64: 'x86_64', x86: 'x86', arm64: 'arm64-v8a', arm: 'armeabi-v7a' })[value] || null,
+  },
+];
+
 function avdAbi(name) {
   const home = avdHome();
-  const tried = [];
   let dir = path.join(home, `${name}.avd`);
   const pointerPath = path.join(home, `${name}.ini`);
-  tried.push(pointerPath);
   try {
     // The .ini beside the .avd directory may point somewhere else entirely.
     const pointer = fs.readFileSync(pointerPath, 'utf8');
@@ -555,20 +574,33 @@ function avdAbi(name) {
   } catch {
     // no pointer file — fall back to the conventional location
   }
+
   const configPath = path.join(dir, 'config.ini');
-  tried.push(configPath);
+  let config;
   try {
-    const config = fs.readFileSync(configPath, 'utf8');
-    const match = /^abi\.type=(.+)$/m.exec(config);
-    if (match) return match[1].trim();
-    tried.push(`${configPath} (readable, but no abi.type line)`);
+    config = fs.readFileSync(configPath, 'utf8');
   } catch {
-    // unreadable config — caller builds every ABI
+    warn(`could not read the ABI of AVD "${name}" — no readable config at ${configPath} ` +
+      `(pointer checked at ${pointerPath})`);
+    return null;
   }
-  // Reported rather than swallowed: this fell back silently on CI, where the AVD is restored
-  // from a cache and may not be laid out the way it is locally. A warning that names the
-  // paths turns "why is this still slow" into one line of log.
-  warn(`could not read the ABI of AVD "${name}" — looked at: ${tried.join(', ')}`);
+
+  const missing = [];
+  for (const { key, parse } of ABI_SOURCES) {
+    const match = new RegExp(`^${key.replace(/\./g, '\\.')}=(.+)$`, 'm').exec(config);
+    if (!match) {
+      missing.push(key);
+      continue;
+    }
+    const abi = parse(match[1].trim());
+    if (abi && KNOWN_ABIS.includes(abi)) return abi;
+    missing.push(`${key} (unrecognised value "${match[1].trim()}")`);
+  }
+
+  // Reported rather than swallowed: this fell back silently on CI, and the fallback builds
+  // every architecture — correct, but several times slower, and indistinguishable from
+  // success in a green run.
+  warn(`could not read the ABI of AVD "${name}" from ${configPath} — tried ${missing.join(', ')}`);
   return null;
 }
 
@@ -1102,6 +1134,8 @@ if (require.main === module) {
     MIN_JAVA_MAJOR,
     MAX_JAVA_MAJOR,
     avdAbi,
+    ABI_SOURCES,
+    KNOWN_ABIS,
     isUsableJavaMajor,
     installedSystemImages,
     systemJavaCandidates,
