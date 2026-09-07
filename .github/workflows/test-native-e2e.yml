@@ -76,6 +76,16 @@ jobs:
       # failure this suite hit during development (Play-Store images hang Maestro's inputText).
       # ~/.android/avd rides along so the AVD survives too; the runner wipes app data after
       # install and both flows launch with clearState, so inherited userdata cannot leak in.
+      # Its qcow2 overlays are excluded: they are the disk state of the last boot — ~3 GB of
+      # the 3.2 GB this key stored, for files the next run never reads, since the emulator
+      # boots with -no-snapshot and recreates the overlays from userdata-qemu.img. Dropping
+      # them keeps the half of the AVD that makes the first boot cheap while returning a third
+      # of the repo's 10 GB cache budget and ~20 s of restore per run. The exclusion must stay
+      # inside the block scalar and unquoted — a `#` line here is a pattern, not a comment.
+      # The -vN suffix moves whenever the path list does: an entry is immutable once written,
+      # so a narrowed path list against an unchanged key keeps restoring the old, wider entry
+      # and never saves the new one. Expect one slow run after a bump — it re-downloads the
+      # emulator and system image, then every run after it restores roughly half as much.
       - name: Cache Android emulator, system image and AVD
         uses: actions/cache@v4
         with:
@@ -83,7 +93,8 @@ jobs:
             ${{ env.ANDROID_SDK_PATH }}/emulator
             ${{ env.ANDROID_SDK_PATH }}/system-images/android-35/google_apis/x86_64
             ~/.android/avd
-          key: android-emu-${{ runner.os }}-api35-google_apis-x86_64-v1
+            !~/.android/avd/*.avd/*.qcow2
+          key: android-emu-${{ runner.os }}-api35-google_apis-x86_64-v2
 
       # ubuntu-24.04 ships the SDK, cmdline-tools and platform-tools but NOT the emulator,
       # and no system image — so scripts/test-maestro.js correctly refuses to start. Install
