@@ -543,22 +543,32 @@ function listExistingAvds(sdk) {
  */
 function avdAbi(name) {
   const home = avdHome();
+  const tried = [];
   let dir = path.join(home, `${name}.avd`);
+  const pointerPath = path.join(home, `${name}.ini`);
+  tried.push(pointerPath);
   try {
     // The .ini beside the .avd directory may point somewhere else entirely.
-    const pointer = fs.readFileSync(path.join(home, `${name}.ini`), 'utf8');
+    const pointer = fs.readFileSync(pointerPath, 'utf8');
     const match = /^path=(.+)$/m.exec(pointer);
     if (match) dir = match[1].trim();
   } catch {
     // no pointer file — fall back to the conventional location
   }
+  const configPath = path.join(dir, 'config.ini');
+  tried.push(configPath);
   try {
-    const config = fs.readFileSync(path.join(dir, 'config.ini'), 'utf8');
+    const config = fs.readFileSync(configPath, 'utf8');
     const match = /^abi\.type=(.+)$/m.exec(config);
     if (match) return match[1].trim();
+    tried.push(`${configPath} (readable, but no abi.type line)`);
   } catch {
     // unreadable config — caller builds every ABI
   }
+  // Reported rather than swallowed: this fell back silently on CI, where the AVD is restored
+  // from a cache and may not be laid out the way it is locally. A warning that names the
+  // paths turns "why is this still slow" into one line of log.
+  warn(`could not read the ABI of AVD "${name}" — looked at: ${tried.join(', ')}`);
   return null;
 }
 
@@ -844,7 +854,7 @@ async function assembleDebug(sdk, java, abi) {
   const gradleCachePrimed = fs.existsSync(path.join(os.homedir(), '.gradle', 'caches'));
   log(
     gradleCachePrimed
-      ? 'building debug APK (in parallel with the emulator boot)…'
+      ? `building debug APK${canOverlapBuildAndBoot() ? ' (in parallel with the emulator boot)' : ''}…`
       : 'building debug APK (first Gradle run downloads the Android toolchain; this can take ' +
           '10–40 minutes — later runs are seconds)…'
   );
@@ -855,7 +865,7 @@ async function assembleDebug(sdk, java, abi) {
     gradleArgs.push(`-PreactNativeArchitectures=${abi}`);
     log(`building for ${abi} only — the ABI this AVD runs`);
   } else {
-    warn('could not read the AVD\'s ABI — building every architecture, which is much slower');
+    warn('building every architecture, which is much slower — see the ABI warning above');
   }
   const res = await runStreaming(gradlew, gradleArgs, {
     cwd: ANDROID_DIR,
