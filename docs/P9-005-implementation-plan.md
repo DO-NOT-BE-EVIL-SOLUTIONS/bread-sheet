@@ -55,10 +55,30 @@ screenshots via Claude Code's `Read` tool (which renders PNGs). Both are harness
 capabilities, and depending on them makes the setup Claude-only in practice regardless of what
 the contract says.
 
-So the driver is a **library**, with three thin wrappers: a CLI, an **MCP stdio server**, and
-native Mastra tools. MCP is the one tool protocol Claude Code, Mastra, OpenAI's Agents SDK,
-Gemini CLI and the rest all speak. Every capability is a typed tool with a JSON result — never
-"run this shell string and parse the prose".
+So the driver is a **library** behind an **MCP stdio server**, with a CLI as the only other
+wrapper (for humans and CI). MCP is the one tool protocol Claude Code, Mastra, OpenAI's Agents
+SDK, Gemini CLI and the rest all speak. Every capability is a typed tool with a JSON result —
+never "run this shell string and parse the prose".
+
+**The agent talks to the driver over stdio and nothing else.** The coordinator spawns
+`node scripts/qa-driver/mcp.js` as a child process *outside* the agent's sandbox and hands the
+agent only the JSON-RPC connection. No harness imports the driver in-process. That costs one
+subprocess and buys the property in the next section.
+
+### The MCP boundary is the privilege boundary
+
+Because the server runs outside the sandbox, the agent needs no Android SDK, no Maestro, no
+`adb` and no repo checkout of its own — **the exposed tool list is exactly the agent's
+capability list**. There is deliberately no generic "run a shell command" tool, so there is no
+path from the model to an arbitrary process. This is a stronger guarantee than bind mounts give,
+and it is uniform across harnesses: a Claude Code session and a Mastra run get the same
+capabilities because they connect to the same server.
+
+The trust boundary moves *into* the server, which is now the only component holding real
+privilege. It must therefore validate its own inputs: every `adb` invocation is built as an
+argument array (`execFile`), never by interpolating a tool argument into a shell string. A
+`tap` target or `type` payload containing shell metacharacters is ordinary input the agent will
+produce sooner or later, not an attack — and it must be inert either way.
 
 ### Vision is optional, and text must stand alone
 
@@ -171,13 +191,26 @@ tearing down. Teardown moves behind `--session-down`, reusing the existing `tear
 
 ### Task 5 — The driver (`bread-sheet-app/scripts/qa-driver/`)
 
-`index.js` is the library; `cli.js` (with `--json` on every verb), `mcp.js` (MCP stdio server,
-one typed tool per verb) and `mastra-tools.js` are wrappers over it.
+`index.js` is the library. Two wrappers: **`mcp.js`** (the MCP stdio server — the interface
+every agent uses) and `cli.js` (`--json` on every verb — for humans, CI and debugging without a
+model in the loop). There is no in-process Mastra tool module; that would put the driver back
+inside the agent's sandbox and give up the boundary above.
 
-Verbs: `describe`, `screenshot`, `tap <testID|text|x,y>`, `type <text>`, `key <back|enter|home>`,
+Tools: `describe`, `screenshot`, `tap <testID|text|x,y>`, `type <text>`, `key <back|enter|home>`,
 `swipe <dir>`, `deeplink <url>`, `logs --since <ts>`, `reset`, `network <on|off>`
-(`adb shell svc wifi disable`), `finding` (validate + persist a finding object). Every verb
-writes its artifact under `docs/qa/runs/<runId>/` and returns the path in its JSON result.
+(`adb shell svc wifi disable`), `finding` (validate + persist a finding object). Every tool
+writes its artifact under `docs/qa/runs/<runId>/` and returns the path in its result — the server
+writes to the real filesystem, so nothing depends on the agent's own view of disk.
+
+Server details that matter:
+
+- **Session pinning.** On startup `mcp.js` reads `bread-sheet-app/.qa/session.json` and pins
+  `ANDROID_SERIAL`. With no session it still starts and every tool returns a structured
+  `no_session` error, so the coordinator gets a clear signal instead of a hang.
+- **Vision as a result shape, not a separate tool.** `screenshot` always writes the PNG as
+  evidence; under `QA_VISION=on` it additionally returns an MCP image content block, and under
+  `QA_VISION=off` it returns only the path. Same tool, same charter, one toggle.
+- **Argument arrays throughout** — see the privilege-boundary note above.
 
 Extract `resolveAndroidSdk`, `resolveJava`, `adb` and `avdHome` into a shared
 `scripts/lib/android.js` that both `test-maestro.js` and the driver import.
@@ -201,39 +234,51 @@ The Mac mini (M4 Pro) is the chosen host, and three things block it today:
 ### Task 7 — Harness B, the reference implementation (`agent-team/`)
 
 - `src/prompts/qa-guardrails.md` (the contract above) and `src/lib/qa-handoff.ts` (the schemas).
-- `src/agents/qa-agent.ts` — Mastra agent with the driver's `mastra-tools` and an **environment
-  facts block** computed up front, reusing `probeEnvironment()` / `formatEnvironmentFacts()` from
+- `src/agents/qa-agent.ts` — Mastra agent whose tools come from `@mastra/mcp`'s `MCPClient`
+  over a stdio transport pointed at `scripts/qa-driver/mcp.js`, plus an **environment facts
+  block** computed up front, reusing `probeEnvironment()` / `formatEnvironmentFacts()` from
   `src/lib/environment.ts`, extended with session state so the agent does not burn a dozen tool
-  calls rediscovering whether the emulator is up.
+  calls rediscovering whether the emulator is up. Adds `@mastra/mcp` to `agent-team`'s deps.
 - `src/qa-coordinator.ts` + `npm run qa-team -- <charter>`.
 - `src/config.ts`: add `AGENT_MODEL_QA` to `resolveModel()`, and a fail-fast **capability floor**
   — tool calling required, `MAX_STEPS`-style budget, and a vision allow-list checked when
   `QA_VISION=on`.
-- **Sandbox boundary — decide this before writing the agent.** `hardenedSandbox()`
+- **Sandbox — settled: the agent gets less, not more.** `hardenedSandbox()`
   (`src/lib/sandbox.ts`) binds `/usr`, `/lib`, `/bin`, a few `/etc` files and *only* the
-  worktree; the user's home directory is not bound and `/tmp` is a fresh tmpfs. Everything the
-  driver needs lives in the unbound part: `adb` at `$ANDROID_HOME/platform-tools/adb`
-  (`~/Android/Sdk`), the Maestro CLI at `~/.maestro/bin/maestro`, and adb's device-auth key at
-  `~/.android/adbkey`. Loopback is fine — no caller passes `allowNetwork`, and it defaults to
-  `true`, so `--unshare-net` is not applied and `localhost:5037` reaches the host's adb server.
-  `--unshare-pid` plus `--die-with-parent` also means a sandboxed process cannot own the
-  long-lived emulator and Metro.
+  worktree; the home directory is unbound and `/tmp` is a fresh tmpfs. Under the in-process
+  design that was a problem, because everything the driver needs sits in the unbound part —
+  `adb` under `~/Android/Sdk`, the Maestro CLI at `~/.maestro/bin/maestro`, adb's device key at
+  `~/.android/adbkey` — and artifacts written to `/tmp` would evaporate. Widening those binds
+  would have loosened a sandbox that exists because an agent once committed outside its pillar
+  (`sandbox.ts:5-13`).
 
-  **Preferred resolution: run the driver outside the sandbox as an MCP server** that the
-  coordinator starts, and give the agent only the stdio connection to it. The agent then needs
-  no SDK, no Maestro and no `adb` inside its own sandbox, and the MCP boundary doubles as the
-  privilege boundary — the tool list *is* the capability list. The alternative (binding the SDK
-  read-only, `~/.android` read-write, and forcing artifacts onto the workspace bind so they
-  survive the tmpfs) widens a sandbox that exists because an agent once committed outside its
-  pillar, and should be the fallback rather than the plan.
+  Over stdio none of that arises. The QA agent reads no repo source (the coordinator injects the
+  charter text into its prompt) and writes no files, so its workspace can be an empty scratch
+  directory rather than the worktree, and it needs no new binds at all. Two properties of the
+  existing sandbox that were previously obstacles are now simply irrelevant: `--unshare-pid`
+  with `--die-with-parent` (a sandboxed process cannot own the long-lived emulator and Metro —
+  the coordinator owns the session, which is why `--session` lives in `test-maestro.js`), and
+  the `/tmp` tmpfs (the server writes artifacts, not the agent).
+
+  One thing to check rather than assume: no caller passes `allowNetwork`, and it defaults to
+  `true`, so `--unshare-net` is not applied today. The QA agent does not need the network at
+  all once the driver is out-of-process — consider passing `allowNetwork: false` for it and
+  confirming the MCP stdio pipe still works, since stdio is a file descriptor and not a socket.
+
+- **New risk this design introduces:** the stdio server's lifetime. If `mcp.js` exits mid-run
+  the agent blocks on a dead pipe. The coordinator owns the child process, must surface a
+  non-zero exit as a run failure rather than a stall, and should bound each tool call with a
+  timeout — the same nested-budget reasoning as `requestDeadline` / `withGeminiDeadline` on the
+  server.
 
 ### Task 8 — Harness A, the interactive convenience
 
-`.mcp.json` registering `qa-driver mcp`, plus a thin `.claude/skills/qa-run/SKILL.md`
-(`/qa-run <charter>`) modelled on `.claude/skills/dev-team/SKILL.md` including its bounded-retry
-discipline. It is deliberately *not* the reference implementation: any MCP client registering the
-same server gets the same capability with no repo change, and that is the test of whether this is
-genuinely provider-agnostic.
+`.mcp.json` registering `node bread-sheet-app/scripts/qa-driver/mcp.js` — the same command
+Harness B spawns — plus a thin `.claude/skills/qa-run/SKILL.md` (`/qa-run <charter>`) modelled on
+`.claude/skills/dev-team/SKILL.md` including its bounded-retry discipline. It is deliberately
+*not* the reference implementation: any MCP client pointed at that command gets the same
+capability with no repo change, and that is the test of whether this is genuinely
+provider-agnostic.
 
 ### Task 9 — Charters (`docs/qa/charters/`)
 
@@ -317,6 +362,11 @@ by `signUp()` / `upgradeAccount()`.
 - [ ] `npm run qa-eval` finds the seeded `NaN` defect and produces a working repro. A QA agent
       that has never produced a true positive is unverified.
 - [ ] At least one `QA_VISION=off` run passes, proving the text-only path rather than assuming it.
+- [ ] The QA agent completes a charter with **no new sandbox binds** — no Android SDK, no
+      Maestro, no `~/.android` — and with an empty scratch directory as its workspace. If it
+      needs a bind, the stdio boundary has leaked and the design is wrong.
+- [ ] The MCP server exposes **no generic shell tool**, and a `tap`/`type` argument containing
+      shell metacharacters is handled as literal text (regression test, not inspection).
 - [ ] The session and the eval both run on **both hosts** (Mac mini and CachyOS).
 
 ## Out of Scope
