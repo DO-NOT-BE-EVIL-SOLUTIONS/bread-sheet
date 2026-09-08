@@ -617,8 +617,24 @@ cycle or worse.
 * **`dev` stays permanent (S-A), not ephemeral (S-B).** A deliberate departure. S-B was doing real
   work in the cost argument — it is what "funds the rest" — so the saving this ADR claims for the
   `dev` stage is not being realised.
-* Still outstanding: the task is still `256`/`512` (step 0b's memory question was never answered on
-  Fargate), the billing alarm (step 6) and the VPC-link keepalive (step 4) are unbuilt.
+* **The task environment is not Terraform-changeable without a forced replacement.**
+  `ignore_changes = [container_definitions]` on the task definition and `[task_definition]` on the
+  service exist so CI's deploys are invisible to Terraform — the side effect is that editing an env
+  var produces no plan diff, and the CD pipeline carries the old value forward because it swaps only
+  the image on the live task definition. See `infrastructure.md` § Changing a task environment
+  variable. This is how `GOOGLE_CLOUD_LOCATION` had to be corrected after Vertex refused
+  `gemini-3.5-flash` in `europe-west1`.
+* **Budget alerts cannot target an IAM principal.** Budgets accepts only `EMAIL` or `SNS`
+  subscribers, and IAM users have no email attribute. Routing through an SNS topic keeps addresses
+  out of the repo and out of state; the topic needs an explicit policy for `budgets.amazonaws.com`
+  or delivery fails silently.
+* **The keepalive could not be an EventBridge Scheduler rule** as step 4 sketched — Scheduler
+  invokes AWS API actions, not arbitrary HTTPS. It is a weekly Lambda instead.
+* Built since: the billing budget (step 6), the VPC-link keepalive (step 4), and the task raised to
+  `256`/`1024` (~$1.62/mo at the measured GB-hr rate) because the single task is now the whole stage.
+* Still outstanding: **API Gateway access logging delivers nothing** — `access_log_settings` applies
+  cleanly but no events reach the log group, so the ingress remains a black box; and step 0b has yet
+  to run against `dev`.
 
 ### Not in scope
 
