@@ -156,7 +156,7 @@ ALB was retired to remove its ~$18/mo flat charge plus two per-AZ public IPv4 ad
 | Network | VPC `10.0.0.0/16`, 2 public + 2 private subnets, **no NAT** | Task runs in the **public** subnets with a public IP (pulls the GHCR image and reaches Supabase / GCP / SSM via the IGW); RDS is private-only. ~$33/mo saved vs NAT. |
 | Ingress | API Gateway **HTTP API** + VPC Link v2 + Cloud Map + ACM cert + Route 53 A-alias | No hourly charge; billed per request. Uses the **`$default` stage** (a named stage prepends itself to the backend path and would break every route) and a **`$default` route** (`ANY /{proxy+}` does not match `/`, which is the health endpoint). Integration timeout **30 s, not increasable** — the server's own budget nests inside it (20 s Gemini call / 25 s handler). Access logs → `/aws/apigateway/breadsheet-dev-api`. |
 | Service discovery | Cloud Map private DNS namespace `breadsheet-dev.local`, service `server` | **SRV** records, TTL 15 — API Gateway's `DiscoverInstances` needs IP *and* port, and an A record carries no port. `health_check_custom_config` must be non-empty (`failure_threshold = 1`, deprecated but required) or AWS stores `null` and every plan re-replaces the service. |
-| Compute | ECS **Fargate** service `breadsheet-dev-server-service` on cluster `breadsheet-server-dev` | Desired 1, `256`/`512`, **X86_64** (image is `linux/amd64`), `assignPublicIp=ENABLED`, rolling deploy + circuit-breaker rollback. Liveness is a **container `healthCheck`** (`wget`, not `curl` — the `node:24-alpine` runtime image has no curl) with `startPeriod = 150` to cover `scripts/start.sh` running `npm run db:deploy` before the server listens. `health_check_grace_period_seconds` was ALB-only and went with it; without the target group, this health check is the *only* thing that detects a wedged task and the only signal ECS reports into Cloud Map. |
+| Compute | ECS **Fargate** service `breadsheet-dev-server-service` on cluster `breadsheet-server-dev` | Desired 1, `256`/`1024`, **X86_64** (image is `linux/amd64`), `assignPublicIp=ENABLED`, rolling deploy + circuit-breaker rollback. Liveness is a **container `healthCheck`** (`wget`, not `curl` — the `node:24-alpine` runtime image has no curl) with `startPeriod = 150` to cover `scripts/start.sh` running `npm run db:deploy` before the server listens. `health_check_grace_period_seconds` was ALB-only and went with it; without the target group, this health check is the *only* thing that detects a wedged task and the only signal ECS reports into Cloud Map. Memory is 1 GB rather than the 512 MB minimum: this single task now *is* the stage, so an OOM is an outage, and the server runs sharp/libvips over a 4 MB upload buffer. At the July measured rate ($1.32 / 297 GB-hr) the extra 0.5 GB is ~$1.62/mo. 256 CPU permits only 512 / 1024 / 2048 MB. |
 | Database | RDS PostgreSQL `db.t4g.micro`, single-AZ, private, encrypted | Reachable only from the task SG on `5432`. Keyless RDS IAM auth (`DB_AUTH=iam`) via `@aws-sdk/rds-signer` — see [ADR 0002](../architecture-decision-records/0002-rds-database-credentials.md). |
 | Images | S3 bucket `breadsheet-dev-s3-…` | `raw/*` private (task `s3:PutObject` only), `processed/*` scoped public-read; resize Lambda deferred. |
 | Image registry | GHCR `ghcr.io/fabelhaft-io/bread-sheet-server` (public) | **Not ECR** — the execution role needs no pull secret. |
@@ -257,6 +257,80 @@ terraform import aws_vpc_security_group_egress_rule.task_all_ipv4 sgr-xxxxxxxx
 
 Do not mix the two styles on one group: a security group with inline blocks treats itself as
 authoritative over that group's whole rule set and will fight the standalone resources.
+
+### Changing a task environment variable
+
+Not obvious, and it will look like your change did nothing:
+
+```
+ecs.tf   aws_ecs_task_definition.server   ignore_changes = [container_definitions]
+ecs.tf   aws_ecs_service.server           ignore_changes = [task_definition]
+```
+
+The `environment` array lives *inside* `container_definitions`, so editing a variable (or the
+`.tfvars` behind one) produces **no plan diff at all**. Those blocks exist so CI's push-deployed
+revisions are invisible to Terraform; the unintended cost is that Terraform can no longer change
+task configuration. The CD pipeline cannot do it either — `build-image.yml` fetches the *live* task
+definition and swaps only the image, carrying the old value forward.
+
+Two steps, and both are needed:
+
+```sh
+# 1. Force a new revision. `ignore_changes` does not apply to a create, so the
+#    replacement is built entirely from config. Any top-level attribute change
+#    (cpu, memory) forces this on its own; otherwise ask for it explicitly.
+terraform apply -var-file=environments/dev.tfvars -replace=aws_ecs_task_definition.server
+
+# 2. Roll it out. The service ignores `task_definition`, so Terraform will not.
+#    The family name resolves to the latest ACTIVE revision.
+aws ecs update-service --cluster breadsheet-server-dev \
+  --service breadsheet-dev-server-service \
+  --task-definition breadsheet-dev-server --force-new-deployment
+```
+
+This is how `GOOGLE_CLOUD_LOCATION` was corrected from `europe-west1` to `global` after Vertex
+returned `404 Publisher model ... not found` for `gemini-3.5-flash` in that region — a failure that
+only appears in the **ECS** logs, since it is the app's upstream call failing rather than anything
+in the ingress.
+
+### Billing guardrail
+
+`budget.tf` creates a monthly `COST` budget (`var.budget_limit_usd`, default `45`) that publishes to
+an SNS topic. Two thresholds: `ACTUAL >= 80%`, and `FORECASTED >= 100%` — the second is the one that
+matters, because dropping the ALB traded a flat hourly charge for per-request pricing with no
+ceiling, and a forecast fires mid-month on a trend rather than after the money is spent.
+
+**Alerts go nowhere until you subscribe.** AWS Budgets accepts only `EMAIL` or `SNS` subscribers —
+there is no IAM-principal subscriber, and IAM users have no email attribute for AWS to resolve. The
+topic keeps addresses out of the repo and out of Terraform state:
+
+```sh
+aws sns subscribe --topic-arn $(terraform -chdir=terraform output -raw billing_alerts_topic_arn) \
+  --protocol email --notification-endpoint you@example.com
+```
+
+Confirm via the emailed link. There is deliberately no `aws_sns_topic_subscription` for email:
+Terraform cannot perform the confirmation, so such a resource sits permanently *pending confirmation*
+and shows as drift on every plan. Note also `aws_sns_topic_policy` granting `budgets.amazonaws.com`
+publish rights — without it the budget applies cleanly and silently delivers nothing.
+
+### VPC link keepalive
+
+`keepalive.tf` runs a 128 MB Lambda weekly (`rate(7 days)`) against `https://server.dev.bread-sheet.com/`.
+A VPC link carrying no traffic for **60 days** goes `INACTIVE`; API Gateway then deletes its network
+interfaces and every request fails for the minutes it takes to reprovision. The request must traverse
+the custom domain — hitting the task directly does not reset the clock.
+
+The ADR sketched an EventBridge *Scheduler* rule, which does not work: Scheduler's universal targets
+invoke AWS API actions, not arbitrary HTTPS endpoints. Reaching a public URL needs either API
+Destinations (which require a Connection with an auth scheme) or a function.
+
+Test it without waiting a week — it throws on any non-2xx, so a broken ingress surfaces as a Lambda
+error metric:
+
+```sh
+aws lambda invoke --function-name breadsheet-dev-vpclink-keepalive /dev/stdout
+```
 
 ### RDS IAM bootstrap (required on any fresh instance)
 
@@ -445,9 +519,10 @@ s3://breadsheet-dev-s3-…/
 ### Pausing / Resuming the Dev Stack
 
 Dev has no NAT gateway (~$33/mo already avoided) and, since [ADR 0003](../architecture-decision-records/0003-always-on-production-cost-architecture.md),
-no load balancer either. The remaining always-on costs are the Fargate task (~$9/mo), RDS
-`db.t4g.micro` + storage (~$15/mo), one public IPv4 for task egress (~$3.65/mo) and the two hosted
-zones (public + the Cloud Map private one, ~$1/mo). **The API Gateway ingress costs nothing at
+no load balancer either. The remaining always-on costs are the Fargate task (~$10.60/mo at
+`256`/`1024`), RDS `db.t4g.micro` + storage (~$15/mo), one public IPv4 for task egress (~$3.65/mo),
+the two hosted zones (public + the Cloud Map private one, ~$1/mo) and the RDS master credential in
+Secrets Manager (~$0.40/mo). **The API Gateway ingress costs nothing at
 rest** — it is billed per request, so there is no longer an ingress tier to shed.
 
 **Tier 1 — CLI only, no Terraform changes (sheds the Fargate task + RDS compute):**
