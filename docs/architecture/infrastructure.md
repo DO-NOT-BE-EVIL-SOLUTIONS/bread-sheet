@@ -141,15 +141,22 @@ resources were hand-built first (for learning), then imported into state with ze
 
 ### Architecture (dev)
 
-Public hostname **`https://server.dev.bread-sheet.com`** → ALB → Fargate task → RDS. The security-group
-chain enforces `internet → ALB → task(:3000) → RDS(:5432)`, each internal hop referencing the previous
-group's SG id (no CIDRs).
+Public hostname **`https://server.dev.bread-sheet.com`** → API Gateway (HTTP API) → VPC Link v2 →
+Cloud Map → Fargate task → RDS. The security-group chain enforces
+`API Gateway (managed) → VPC link ENI → task(:3000) → RDS(:5432)`, each internal hop referencing the
+previous group's SG id (no CIDRs).
+
+**There is no load balancer.** TLS terminates at API Gateway's managed fleet, outside the VPC, so the
+VPC link ENIs take no public ingress at all — their security group only needs egress to the task. The
+ALB was retired to remove its ~$18/mo flat charge plus two per-AZ public IPv4 addresses; see
+[ADR 0003](../architecture-decision-records/0003-always-on-production-cost-architecture.md).
 
 | Component | Resource | Notes |
 |---|---|---|
 | Network | VPC `10.0.0.0/16`, 2 public + 2 private subnets, **no NAT** | Task runs in the **public** subnets with a public IP (pulls the GHCR image and reaches Supabase / GCP / SSM via the IGW); RDS is private-only. ~$33/mo saved vs NAT. |
-| Ingress | Application Load Balancer + ACM cert + Route 53 alias | HTTPS `:443` (cert for `server.dev.bread-sheet.com`) → IP target group (`:3000`, health `GET /`); HTTP `:80` → 301. |
-| Compute | ECS **Fargate** service `breadsheet-dev-server-service` on cluster `breadsheet-server-dev` | Desired 1, `256`/`512`, **X86_64** (image is `linux/amd64`), `assignPublicIp=ENABLED`, rolling deploy + circuit-breaker rollback, 120 s health-check grace (migrations run before serving). |
+| Ingress | API Gateway **HTTP API** + VPC Link v2 + Cloud Map + ACM cert + Route 53 A-alias | No hourly charge; billed per request. Uses the **`$default` stage** (a named stage prepends itself to the backend path and would break every route) and a **`$default` route** (`ANY /{proxy+}` does not match `/`, which is the health endpoint). Integration timeout **30 s, not increasable** — the server's own budget nests inside it (20 s Gemini call / 25 s handler). Access logs → `/aws/apigateway/breadsheet-dev-api`. |
+| Service discovery | Cloud Map private DNS namespace `breadsheet-dev.local`, service `server` | **SRV** records, TTL 15 — API Gateway's `DiscoverInstances` needs IP *and* port, and an A record carries no port. `health_check_custom_config` must be non-empty (`failure_threshold = 1`, deprecated but required) or AWS stores `null` and every plan re-replaces the service. |
+| Compute | ECS **Fargate** service `breadsheet-dev-server-service` on cluster `breadsheet-server-dev` | Desired 1, `256`/`512`, **X86_64** (image is `linux/amd64`), `assignPublicIp=ENABLED`, rolling deploy + circuit-breaker rollback. Liveness is a **container `healthCheck`** (`wget`, not `curl` — the `node:24-alpine` runtime image has no curl) with `startPeriod = 150` to cover `scripts/start.sh` running `npm run db:deploy` before the server listens. `health_check_grace_period_seconds` was ALB-only and went with it; without the target group, this health check is the *only* thing that detects a wedged task and the only signal ECS reports into Cloud Map. |
 | Database | RDS PostgreSQL `db.t4g.micro`, single-AZ, private, encrypted | Reachable only from the task SG on `5432`. Keyless RDS IAM auth (`DB_AUTH=iam`) via `@aws-sdk/rds-signer` — see [ADR 0002](../architecture-decision-records/0002-rds-database-credentials.md). |
 | Images | S3 bucket `breadsheet-dev-s3-…` | `raw/*` private (task `s3:PutObject` only), `processed/*` scoped public-read; resize Lambda deferred. |
 | Image registry | GHCR `ghcr.io/fabelhaft-io/bread-sheet-server` (public) | **Not ECR** — the execution role needs no pull secret. |
@@ -169,8 +176,13 @@ The app authenticates to RDS without a stored password. The mechanism:
   `Signer` and returns an async `password` callback. The `pg.Pool` invokes it on each new physical
   connection — minting a 15-min IAM auth token (local signing, no network round-trip).
 - **Migrations:** the Prisma migration engine reads `DATABASE_URL` directly and cannot use the pg.Pool
-  callback. The ECS startup script (`scripts/start.sh`) mints a token via `scripts/rds-token.mjs` and
-  injects it into `DATABASE_URL` before running `npm run db:deploy`.
+  callback. The ECS startup script (`scripts/start.sh`) calls `node scripts/rds-token.mjs --database-url`,
+  which mints a token *and assembles the whole URL*, before running `npm run db:deploy`. The assembly
+  belongs to the script rather than the shell because the token must be percent-encoded to sit in the
+  password slot: an RDS auth token is itself shaped like `host:5432/?Action=connect&X-Amz-Signature=...`,
+  so interpolating it raw ends the userinfo at its first `/` and Prisma rejects the result with
+  `P1013: invalid port number in database URL`. Bare `scripts/rds-token.mjs` still prints the raw token,
+  which is the form to paste at a `psql` password prompt.
 - **IAM:** the task role has `rds-db:connect` scoped to the DB instance resource ID + the
   `breadsheet_iam` Postgres user (which has the `rds_iam` grant).
 - **TLS:** mandatory for IAM auth. The pg pool verifies the RDS server cert against the CA bundle
@@ -202,20 +214,182 @@ terraform/
   locals.tf       # name_prefix, tags
   backend.tf      # S3 remote state, per-env keys
   network.tf      # VPC, subnets, IGW, route tables (no NAT)
-  security.tf     # ALB / task / RDS security groups + cross-referencing rules
+  security.tf     # VPC link / task / RDS security groups. The task + vpclink groups use
+                  # standalone *_rule resources, not inline blocks — see the note below.
   rds.tf          # DB subnet group + RDS instance
   iam.tf          # execution / task / deployer roles, policies, GitHub OIDC provider
   s3.tf           # images bucket + public-access-block + ownership + policy + CORS
   ssm.tf          # SSM parameters (Supabase URL + key)
   ecs.tf          # ECS cluster + task definition + service
-  alb.tf          # ALB + target group + listeners + ACM cert + validation
-  dns.tf          # Route 53 zone (dev.bread-sheet.com) + A-alias → ALB
+  api-gateway.tf  # HTTP API + VPC link + integration + $default route/stage + custom domain + access logs
+  service-discovery.tf # Cloud Map private DNS namespace + SRV service
+  dns.tf          # Route 53 zone (dev.bread-sheet.com) + ACM cert + validation + A-alias → API Gateway
   gcp-wif.tf      # GCP WIF pool + AWS provider + SA + bindings
   outputs.tf      # Useful references (URLs, ARNs, names)
   environments/
     dev.tfvars           # Variable values for dev
     dev.s3.tfbackend     # Backend config for dev state
 ```
+
+### Security groups: standalone rules, not inline blocks
+
+`aws_security_group.task` and `aws_security_group.vpclink` declare **no inline `ingress`/`egress`
+blocks**. Their rules are separate `aws_vpc_security_group_ingress_rule` /
+`aws_vpc_security_group_egress_rule` resources. Two distinct problems forced this, both worth
+knowing before anyone "tidies" them back inline:
+
+* **Cycles.** vpclink egresses to task and task ingresses from vpclink. As inline blocks that is a
+  dependency cycle Terraform refuses to plan. As separate resources it is three nodes it can order.
+* **Deadlock on a changed reference.** When the task SG's inline ingress still referenced the ALB SG
+  in state while the config had moved to vpclink, Terraform had no edge saying "revoke that rule
+  before destroying the ALB SG". It scheduled the destroy first, and the destroy then blocked for
+  15 minutes on `DependencyViolation` behind the very update that would have released it. The rule
+  had to be revoked by hand with `aws ec2 revoke-security-group-ingress` to break the deadlock.
+
+A related trap when migrating: `ingress`/`egress` on `aws_security_group` are `Optional` **and
+`Computed`**, so deleting an inline block does *not* revoke the rules — it only stops managing them.
+The rules stay in AWS, and the replacement standalone resources then fail with
+`InvalidPermission.Duplicate`. Import them instead:
+
+```sh
+terraform import aws_vpc_security_group_egress_rule.task_all_ipv4 sgr-xxxxxxxx
+```
+
+Do not mix the two styles on one group: a security group with inline blocks treats itself as
+authoritative over that group's whole rule set and will fight the standalone resources.
+
+### RDS IAM bootstrap (required on any fresh instance)
+
+The app authenticates with IAM tokens (`DB_AUTH=iam`, passwordless `DATABASE_URL`), so the master
+credential is break-glass only — it is generated and rotated by RDS into Secrets Manager
+(`manage_master_user_password = true`) and never enters Terraform state.
+
+It has exactly one job. The `breadsheet_iam` role and its `rds_iam` grant live *inside* the
+database, so a newly created instance does not have them and the task cannot connect:
+
+```sh
+SECRET=$(aws rds describe-db-instances --db-instance-identifier breadsheet-dev-database-1 \
+  --query 'DBInstances[0].MasterUserSecret.SecretArn' --output text)
+aws secretsmanager get-secret-value --secret-id "$SECRET" --query SecretString --output text
+```
+
+```sql
+CREATE USER breadsheet_iam WITH LOGIN;
+GRANT rds_iam TO breadsheet_iam;
+GRANT ALL PRIVILEGES ON DATABASE breadsheet TO breadsheet_iam;
+GRANT ALL ON SCHEMA public TO breadsheet_iam;
+```
+
+The schema grant is not redundant. Since PostgreSQL 15 the `public` schema is owned by
+`pg_database_owner` and no longer grants `CREATE` to `PUBLIC`, so on this instance (18.3)
+the database-level grant alone leaves `breadsheet_iam` unable to create tables and
+`prisma migrate deploy` fails with `permission denied for schema public` — a second failure
+that only appears once the authentication one is fixed.
+
+The instance is private with an SG that admits only the task SG, so run this **through ECS Exec**
+rather than from a workstation. Use the one-off psql task below, not the application service: the
+bootstrap is most often needed precisely when the app task cannot start, and a task that crash-loops
+on `db:deploy` never stays up long enough to exec into. The one-off task carries the same SG and
+task role but runs `sleep`, so it is always available.
+
+Restoring from a snapshot skips all of this — the role comes back with the data.
+
+### Ad-hoc SQL access (one-off psql task)
+
+There is no network path from a workstation to the database: it is `publicly_accessible = false`,
+sits in the two private subnets, and the private route table has **no internet route at all** (no
+NAT gateway), so making it public would not help — there is nowhere for the traffic to arrive from.
+Its security group admits port 5432 from exactly one source, the task SG. Anything that connects has
+to run inside the VPC wearing that SG.
+
+The cheapest thing that satisfies that is a throwaway Fargate task running the stock `postgres`
+image. It needs no Terraform: it reuses the existing execution and task roles (the task role already
+carries the `ssmmessages` permissions ECS Exec needs, and `rds-db:connect` for `breadsheet_iam`).
+
+**Prerequisite, once per workstation:** ECS Exec needs the Session Manager plugin, which the AWS CLI
+does not bundle. On Arch/CachyOS it is the AUR package `aws-session-manager-plugin`; with no root,
+AWS's Debian package can be unpacked into `~/.local/bin` instead:
+
+```sh
+curl -fsSL -o smp.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb
+ar x smp.deb && tar xzf data.tar.gz
+install -Dm755 usr/local/sessionmanagerplugin/bin/session-manager-plugin ~/.local/bin/session-manager-plugin
+```
+
+**Register the task definition** (once per account — it survives, so this is skippable on later runs):
+
+```sh
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+aws ecs register-task-definition --region eu-west-1 --cli-input-json "{
+  \"family\": \"breadsheet-dev-psql\",
+  \"requiresCompatibilities\": [\"FARGATE\"], \"networkMode\": \"awsvpc\",
+  \"cpu\": \"256\", \"memory\": \"512\",
+  \"executionRoleArn\": \"arn:aws:iam::${ACCOUNT}:role/breadsheet-dev-ecs-execution\",
+  \"taskRoleArn\": \"arn:aws:iam::${ACCOUNT}:role/breadsheet-dev-ecs-task\",
+  \"containerDefinitions\": [{
+    \"name\": \"psql\", \"image\": \"postgres:18-alpine\", \"essential\": true,
+    \"command\": [\"sleep\", \"3600\"]
+  }]
+}"
+```
+
+**Start it and exec in.** The SG and subnet are looked up rather than pinned, so this keeps working
+across a rebuild:
+
+```sh
+SG=$(aws ec2 describe-security-groups --region eu-west-1 \
+  --filters Name=group-name,Values="BreadSheet DEV SG Tasks" \
+  --query 'SecurityGroups[0].GroupId' --output text)
+SUBNET=$(aws ec2 describe-subnets --region eu-west-1 \
+  --filters Name=tag:Name,Values="breadsheet-dev-subnet-az1-public" \
+  --query 'Subnets[0].SubnetId' --output text)
+
+TASK=$(aws ecs run-task --region eu-west-1 --cluster breadsheet-server-dev \
+  --launch-type FARGATE --task-definition breadsheet-dev-psql --enable-execute-command \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+  --query 'tasks[0].taskArn' --output text)
+
+# This waits for the task, not for the exec agent — that comes up a few seconds later, so a
+# first `execute-command` may still fail with TargetNotConnectedException. Retry, or check:
+#   aws ecs describe-tasks --region eu-west-1 --cluster breadsheet-server-dev --tasks "$TASK" \
+#     --query 'tasks[0].containers[0].managedAgents'
+aws ecs wait tasks-running --region eu-west-1 --cluster breadsheet-server-dev --tasks "$TASK"
+
+aws ecs execute-command --region eu-west-1 --cluster breadsheet-server-dev \
+  --task "$TASK" --container psql --interactive --command "/bin/sh"
+```
+
+`assignPublicIp=ENABLED` is required: with no NAT gateway, that public IP is the only way the task
+can pull its image from Docker Hub. Note also that the id in `run-task` output under `attachments`
+is the **ENI attachment** id, not the task id — passing it to `execute-command` yields a confusing
+`InvalidParameterException`.
+
+**Connect.** Mint an IAM token locally (valid 15 min) and paste it at the password prompt — the raw
+form, not the URL-encoded one:
+
+```sh
+aws rds generate-db-auth-token --region eu-west-1 \
+  --hostname breadsheet-dev-database-1.cna48wy46m01.eu-west-1.rds.amazonaws.com \
+  --port 5432 --username breadsheet_iam
+```
+
+```sh
+psql "host=breadsheet-dev-database-1.cna48wy46m01.eu-west-1.rds.amazonaws.com user=breadsheet_iam dbname=breadsheet sslmode=require"
+```
+
+Do not pass the token through a `run-task` env override: those are readable via `DescribeTasks`.
+If the token is rejected with `Role "breadsheet_iam" does not exist`, the instance has not been
+bootstrapped — connect as the break-glass master (`db_admin_1001`, password from Secrets Manager)
+and run the bootstrap above.
+
+**Clean up.** The container is a `sleep 3600`, so it exits on its own within the hour; stop it
+sooner with `aws ecs stop-task --region eu-west-1 --cluster breadsheet-server-dev --task "$TASK"`.
+Leave the task definition registered — it costs nothing and it is the fallback when the application
+task is the thing that is broken.
+
+For a GUI client instead (IntelliJ/DataGrip), the equivalent is an SSM-managed `t4g.nano` bastion
+plus `aws ssm start-session --document-name AWS-StartPortForwardingSessionToRemoteHost`. That is
+real Terraform and a standing ~$4/mo, which is why the one-off task is the default.
 
 ### Remote State (S3 backend)
 
@@ -270,14 +444,11 @@ s3://breadsheet-dev-s3-…/
 
 ### Pausing / Resuming the Dev Stack
 
-Dev has no NAT gateway (~$33/mo already avoided). The remaining always-on costs are the Fargate
-task (~$9/mo), RDS `db.t4g.micro` (~$12/mo), and the ALB (~$18/mo **flat**, regardless of
-traffic — an ALB has no "stopped" state, only exists-or-doesn't). Two tiers, by how much of that
-you want to shed.
-
-> [ADR 0003](../architecture-decision-records/0003-always-on-production-cost-architecture.md)
-> (*Proposed*) argues for retiring these tiers in favour of destroying `dev` between sessions, and
-> for building `prod` without an ALB at all. The tiers below describe the stack as it stands today.
+Dev has no NAT gateway (~$33/mo already avoided) and, since [ADR 0003](../architecture-decision-records/0003-always-on-production-cost-architecture.md),
+no load balancer either. The remaining always-on costs are the Fargate task (~$9/mo), RDS
+`db.t4g.micro` + storage (~$15/mo), one public IPv4 for task egress (~$3.65/mo) and the two hosted
+zones (public + the Cloud Map private one, ~$1/mo). **The API Gateway ingress costs nothing at
+rest** — it is billed per request, so there is no longer an ingress tier to shed.
 
 **Tier 1 — CLI only, no Terraform changes (sheds the Fargate task + RDS compute):**
 
@@ -310,35 +481,23 @@ Caveats:
   `apply`ing while paused, or add `desired_count` to `ignore_changes` if pause/resume becomes
   routine.
 
-**Tier 2 — also tear down the ALB (sheds the flat ~$16–18/mo charge too):**
+**Tier 2 — retired.** This tier existed only to destroy the ALB, which no longer exists. Nothing in
+the API Gateway ingress bills hourly, so there is nothing to tear down between sessions: an idle
+HTTP API, VPC link and Cloud Map namespace cost approximately the private hosted zone's $0.50/mo and
+nothing else.
 
-```sh
-# Pause (review first, then destroy)
-terraform -chdir=terraform plan -destroy -var-file=environments/dev.tfvars -target=aws_lb.main
-terraform -chdir=terraform destroy -var-file=environments/dev.tfvars -target=aws_lb.main
-
-# Resume
-terraform -chdir=terraform apply -var-file=environments/dev.tfvars
-# then re-run the Tier 1 resume commands (RDS + ECS) — no point paying for compute with no ALB in front of it
-
-# Check state
-aws elbv2 describe-load-balancers --names breadsheet-dev-alb   # "LoadBalancerNotFoundException" while paused
-terraform -chdir=terraform plan -var-file=environments/dev.tfvars   # "No changes" once fully resumed
-```
-
-`-target=aws_lb.main` on a destroy automatically cascades to everything that *depends on* the ALB —
-`aws_lb_listener.https`, `aws_lb_listener.http_redirect`, and `aws_route53_record.server` — since
-they'd otherwise reference a deleted resource. The target group, the ACM cert (+ validation), the
-Route 53 zone, and the ECS service sit outside that dependency chain and are untouched, so the cert
-stays `Issued` and nothing needs re-validating on resume — `apply` just recreates the ALB, listeners,
-and alias record pointing at the new ALB's DNS name.
+> One thing the ingress *does* need while idle: a VPC link that carries no traffic for **60 days**
+> transitions to `INACTIVE`, and requests then fail for several minutes while API Gateway
+> reprovisions its network interfaces. A weekly external uptime check against
+> `https://server.dev.bread-sheet.com/` is enough to prevent that, and replaces the alerting the ALB
+> health check used to provide. It must traverse the custom domain, not hit the task directly.
 
 **Tier 3 — snapshot and delete RDS (long pauses; sheds DB storage too):**
 
 For a pause of a month or more, stopping is the wrong tool: AWS force-restarts a stopped instance
 after 7 days, and stopped or not you keep paying for the 20 GB gp3 volume and Performance Insights.
 Deleting the instance leaves only manual-snapshot storage, billed on *used* data — cents for a dev
-DB. Do Tier 2 first (the ALB is the bigger line item), then:
+DB. With the ALB gone, RDS is now the largest single line item, so this tier is the main lever:
 
 ```sh
 # ── Pause ─────────────────────────────────────────────────────────────────────
@@ -367,8 +526,11 @@ aws rds describe-db-snapshots --region eu-west-1 \
 aws ecs describe-task-definition --region eu-west-1 --task-definition breadsheet-dev-server \
   --query 'taskDefinition.containerDefinitions[0].image' --output text
 
-# 5. Recreate everything from the snapshot. Restores the DB, then the ALB and the three
-#    cascade resources below — one apply, no manual reconnection.
+# 5. Recreate everything from the snapshot — one apply, no manual reconnection.
+#    Restoring matters for more than the data: the `breadsheet_iam` role and its
+#    `rds_iam` grant live INSIDE the database. A fresh (non-restored) instance has
+#    neither, so the task will crash-loop on connect until they are recreated by
+#    hand over the master credential (see § RDS IAM bootstrap).
 terraform -chdir=terraform apply -var-file=environments/dev.tfvars \
   -var db_snapshot_identifier=breadsheet-dev-pause-YYYY-MM-DD
 

@@ -7,6 +7,19 @@ resource "aws_route53_zone" "dev" {
   tags = merge(local.tags, { Name = "dev.bread-sheet.com" })
 }
 
+# ──────────── ACM Certificate ─────────────────────────────────────────────────
+
+resource "aws_acm_certificate" "server" {
+  domain_name       = "server.dev.bread-sheet.com"
+  validation_method = "DNS"
+
+  tags = merge(local.tags, { Name = "server.dev.bread-sheet.com" })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 # ──────────── ACM DNS Validation Record ───────────────────────────────────────
 
 resource "aws_route53_record" "acm_validation" {
@@ -22,7 +35,7 @@ resource "aws_acm_certificate_validation" "server" {
   validation_record_fqdns = [aws_route53_record.acm_validation.fqdn]
 }
 
-# ──────────── A Record → ALB ──────────────────────────────────────────────────
+# ──────────── A Record → API Gateway ──────────────────────────────────────────────────
 
 resource "aws_route53_record" "server" {
   zone_id = aws_route53_zone.dev.zone_id
@@ -30,8 +43,8 @@ resource "aws_route53_record" "server" {
   type    = "A"
 
   alias {
-    name                   = "dualstack.${aws_lb.main.dns_name}"
-    zone_id                = aws_lb.main.zone_id
-    evaluate_target_health = true
+    name                   = aws_apigatewayv2_domain_name.server.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.server.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
   }
 }

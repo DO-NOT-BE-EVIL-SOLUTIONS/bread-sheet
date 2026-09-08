@@ -43,7 +43,7 @@ resource "aws_ecs_task_definition" "server" {
     # push-deployed revisions are invisible to Terraform, so this pin drifts behind the live
     # service. It is the image the stack comes back on after a Tier 3 pause; re-point it at the
     # running revision before resuming (see infrastructure.md § Pausing / Resuming the Dev Stack).
-    image     = "ghcr.io/fabelhaft-io/bread-sheet-server:d659c132283f5cb6f8661df053d1c3f59e94d37f"
+    image     = "ghcr.io/fabelhaft-io/bread-sheet-server:25f6411ca2bdbadda59761d0e51a30e11dddef80"
     essential = true
 
     portMappings = [{
@@ -52,6 +52,17 @@ resource "aws_ecs_task_definition" "server" {
     }]
 
     command = ["sh", "scripts/start.sh"]
+
+    healthCheck = {
+      command     = ["CMD-SHELL", "wget -q -O- http://localhost:3000/ || exit 1"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      # Replaces health_check_grace_period_seconds (ALB-only, now removed).
+      # Must cover scripts/start.sh running `npm run db:deploy` before the
+      # server listens — that is why it is 150 and not the ALB's 120.
+      startPeriod = 150
+    }
 
     environment = [
       { name = "PORT", value = "3000" },
@@ -118,13 +129,11 @@ resource "aws_ecs_service" "server" {
     assign_public_ip = true
   }
 
-  load_balancer {
-    target_group_arn = aws_lb_target_group.server.arn
-    container_name   = "server"
-    container_port   = 3000
+  service_registries {
+    registry_arn   = aws_service_discovery_service.server.arn
+    container_name = "server"
+    container_port = 3000
   }
-
-  health_check_grace_period_seconds = 120
 
   deployment_circuit_breaker {
     enable   = true
