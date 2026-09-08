@@ -8,9 +8,9 @@ output "images_bucket" {
   value       = aws_s3_bucket.images.bucket
 }
 
-output "alb_dns_name" {
-  description = "ALB DNS name."
-  value       = aws_lb.main.dns_name
+output "api_endpoint" {
+  description = "API Gateway's default execute-api endpoint — bypasses DNS and the custom domain, so it isolates the integration when debugging."
+  value       = aws_apigatewayv2_api.main.api_endpoint
 }
 
 output "server_url" {

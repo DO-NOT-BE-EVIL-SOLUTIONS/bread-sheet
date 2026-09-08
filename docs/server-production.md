@@ -41,14 +41,14 @@
 - [ ] Verify `ALLOWED_ORIGINS` is set — the CORS default allows localhost only, production will block the app otherwise
 - [ ] Review rate limit thresholds (`apiLimiter`, `userLimiter`, `syncLimiter`) against expected production traffic
 - [ ] Ensure error responses never leak stack traces — `errorHandler` should not forward `err.stack` in `NODE_ENV=production`
-- [ ] Put WAF rules (AWS WAF or Cloudflare) in front of the ALB for network-layer DDoS protection
+- [ ] Put WAF rules (AWS WAF or Cloudflare) in front of the API Gateway HTTP API for network-layer DDoS protection
 - [ ] Set anonymous user cap in Supabase project settings
 
 ## Infrastructure
 
 - [ ] Confirm the Docker image builds cleanly locally: `docker build ./server` — Docker Compose is local dev only; ECS pulls the image from **GHCR** (`ghcr.io/fabelhaft-io/bread-sheet-server`, public), not ECR
 - [ ] Push-CD wired: a gated prod release (tag/release + `environment: production` reviewer) promotes the same `:<git-sha>` already running in dev to the prod ECS service (see `infrastructure.md` § Deployment Pipeline)
-- [ ] ALB **target-group** health check points to `GET /` (matcher `200`); set a health-check grace period that covers migrate-on-boot
+- [ ] Container `healthCheck` points to `GET /` with a `startPeriod` covering migrate-on-boot (there is no target group any more — the container health check is the only liveness signal, and the only one ECS reports into Cloud Map)
 - [ ] Fargate task CPU/memory sized for the workload (start `256`/`512`, bump on OOM); ECS deployment circuit breaker + rollback enabled
 - [ ] ECS Service Auto Scaling configured if traffic is variable
 

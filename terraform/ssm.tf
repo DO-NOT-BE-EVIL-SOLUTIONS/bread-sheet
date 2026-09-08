@@ -1,18 +1,5 @@
 # ──────────── SSM Parameters ──────────────────────────────────────────────────
 
-resource "aws_ssm_parameter" "database_url" {
-  name        = "/breadsheet/dev/DATABASE_URL"
-  description = "url for development database"
-  type        = "SecureString"
-  value       = "placeholder"
-
-  tags = merge(local.tags, { Name = "/breadsheet/dev/DATABASE_URL" })
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
 resource "aws_ssm_parameter" "supabase_url" {
   name        = "/breadsheet/dev/SUPABASE_URL"
   description = "supabase link to the dev stage"

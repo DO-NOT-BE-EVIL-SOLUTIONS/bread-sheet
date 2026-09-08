@@ -34,27 +34,23 @@ resource "aws_db_instance" "main" {
 
   iam_database_authentication_enabled = true
 
-  skip_final_snapshot    = var.db_skip_final_snapshot
-  deletion_protection    = var.db_deletion_protection
-  copy_tags_to_snapshot  = true
+  skip_final_snapshot   = var.db_skip_final_snapshot
+  deletion_protection   = var.db_deletion_protection
+  copy_tags_to_snapshot = true
 
   performance_insights_enabled = true
   backup_retention_period      = 1
 
   enabled_cloudwatch_logs_exports = ["iam-db-auth-error", "postgresql", "upgrade"]
 
-  manage_master_user_password = false
+  # This credential is break-glass only: the task authenticates passwordless with IAM tokens
+  manage_master_user_password = true
 
-  # Restore-from-snapshot path (resuming a long pause). Consumed at CREATE only; on a
-  # restore, `db_name`, `username` and the master password come from the snapshot and the
-  # arguments above are ignored by RDS. The provider marks this ForceNew, so it is also in
-  # ignore_changes — otherwise clearing the variable after the resume would plan to replace
-  # (i.e. wipe) the live instance.
   snapshot_identifier = var.db_snapshot_identifier != "" ? var.db_snapshot_identifier : null
 
   tags = merge(local.tags, { Name = "breadsheet-dev-database-1" })
 
   lifecycle {
-    ignore_changes = [password, snapshot_identifier]
+    ignore_changes = [snapshot_identifier]
   }
 }

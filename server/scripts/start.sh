@@ -7,8 +7,11 @@ set -e
 # the pg.Pool async password callback that the runtime uses).
 
 if [ "$DB_AUTH" = "iam" ]; then
-  TOKEN=$(node scripts/rds-token.mjs)
-  export DATABASE_URL="postgresql://${DB_USER}:${TOKEN}@${DB_HOST}:${DB_PORT:-5432}/${DB_NAME:-breadsheet}?sslmode=require"
+  # The script assembles the URL itself: the token has to be percent-encoded
+  # before it can sit in the password slot (it contains `/`, `?`, `&` and `=`),
+  # which is not something POSIX sh can do cleanly.
+  DATABASE_URL=$(node scripts/rds-token.mjs --database-url)
+  export DATABASE_URL
 fi
 
 npm run db:deploy

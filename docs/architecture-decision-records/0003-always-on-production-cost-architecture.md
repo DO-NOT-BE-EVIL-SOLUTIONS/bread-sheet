@@ -1,6 +1,6 @@
 # Always-On Production Cost Architecture
 
-* Status: Proposed
+* Status: Accepted — implemented on `dev` 2026-09-08; `prod` (step 7) outstanding
 * Date: 2026-08-04
 
 ## Context and Problem Statement
@@ -576,6 +576,49 @@ Once `dev` has come up clean on the new ingress at least once, add `environments
 keeping both stages on one shape. What differs is `.tfvars` only: `environment = "prod"`, the S3
 bucket name, the GCP WIF pool, and `db_deletion_protection = true` / `db_skip_final_snapshot = false`
 (currently `false` / `true`, which are correct for a disposable `dev` and wrong for `prod`).
+
+### As built — where reality differed from this plan
+
+Recorded so the `prod` stamp (step 7) does not rediscover any of it. Each of these cost an apply
+cycle or worse.
+
+* **A prerequisite this ADR missed entirely:** a Cloud Map *private DNS namespace* requires the VPC
+  to have **both** `enableDnsSupport` and `enableDnsHostnames`. `aws_vpc.main` had only the former
+  (`enable_dns_hostnames` defaults to `false` on a non-default VPC). It is an in-place update — but
+  check the plan says `~`, never `-/+`, because replacing the VPC would take every subnet with it.
+* **`health_check_custom_config {}` does not converge.** `failure_threshold` is deprecated, but an
+  *empty* block sends nothing, AWS stores `HealthCheckCustomConfig = null`, the read returns null,
+  and every subsequent plan re-adds the block — which forces replacement and recreates the same
+  nothing. Set `failure_threshold = 1` and accept the deprecation warning. Fix this **before** the
+  ECS service exists: `service_registries.registry_arn` is ForceNew, so replacing the Cloud Map
+  service later cascades into replacing the ECS service.
+* **The route must be `$default`, not `ANY /{proxy+}`** as written in step 4. `{proxy+}` does not
+  match the root path, and `GET /` is the health endpoint the keepalive has to reach.
+* **Security groups must use standalone rule resources.** Inline `ingress`/`egress` blocks cycle
+  (task ↔ vpclink) and, worse, deadlock: with the task SG's inline rule still referencing the ALB SG
+  in state, Terraform ordered the ALB SG destroy *ahead* of the update that would have released it
+  and spun 15 minutes on `DependencyViolation`. Note also that `ingress`/`egress` are `Optional` and
+  `Computed`, so deleting an inline block does not revoke the rules — it stops managing them, and
+  the replacement standalone resources then fail `InvalidPermission.Duplicate`. Import instead.
+* **The ACM certificate was declared in `alb.tf`.** Deleting that file would have destroyed a valid
+  issued certificate. Moving a resource between `.tf` files is free — Terraform keys state on the
+  resource address, not the filename — so it was relocated to `dns.tf` first, with no plan diff.
+* **`aws_db_instance` had no `password` and `manage_master_user_password = false`,** which fails on
+  create. `lifecycle { ignore_changes = [password] }` suppresses diffs on an *existing* resource and
+  does nothing on create, so the gap was invisible for as long as the instance was never rebuilt.
+  Resolved with `manage_master_user_password = true`: RDS generates and rotates the credential in
+  Secrets Manager and nothing sensitive reaches Terraform state.
+* **Skipping the snapshot restore has a hidden cost.** The `breadsheet_iam` role and its `rds_iam`
+  grant live inside the database, so a fresh instance has neither and the task crash-loops on
+  connect until they are created by hand over ECS Exec. See `infrastructure.md` § RDS IAM bootstrap.
+* **Access logging was added** (`access_log_settings` → `/aws/apigateway/breadsheet-dev-api`). The
+  ALB's access logs were the only record of requests that never reach the app, and `integrationStatus`
+  / `integrationErrorMessage` are the only place a VPC Link or Cloud Map failure is visible.
+* **`dev` stays permanent (S-A), not ephemeral (S-B).** A deliberate departure. S-B was doing real
+  work in the cost argument — it is what "funds the rest" — so the saving this ADR claims for the
+  `dev` stage is not being realised.
+* Still outstanding: the task is still `256`/`512` (step 0b's memory question was never answered on
+  Fargate), the billing alarm (step 6) and the VPC-link keepalive (step 4) are unbuilt.
 
 ### Not in scope
 

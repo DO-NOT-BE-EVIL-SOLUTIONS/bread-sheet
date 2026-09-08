@@ -35,7 +35,7 @@
 * **ORM:** Prisma
 * **Authentication:** Supabase Auth
 * **External Data:** Open Food Facts API
-* **Infrastructure:** AWS ECS Fargate (dev) behind an ALB, AWS RDS, S3, SSM, Terraform, GitHub-Actions push-CD, Google Vision and Gemini (keyless via Workload Identity Federation)
+* **Infrastructure:** AWS ECS Fargate (dev) behind an API Gateway HTTP API (VPC Link → Cloud Map, no load balancer), AWS RDS, S3, SSM, Terraform, GitHub-Actions push-CD, Google Vision and Gemini (keyless via Workload Identity Federation)
 * **Local Dev:** Docker Compose / Podman, LocalStack (for AWS service emulation)
 
 ## 🚀 Getting Started
