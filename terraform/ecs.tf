@@ -28,13 +28,16 @@ resource "aws_ecs_task_definition" "server" {
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = "256"
-  # 1 GB, not the Fargate minimum of 512 MB. This single task IS the stage now
-  # that the ALB is gone, so an OOM is an outage rather than a shed target — and
-  # the server runs sharp/libvips over a multer memoryStorage buffer capped at
-  # 4 MB. Measured from the July bill ($1.32 / 297 GB-hr), the extra 0.5 GB costs
-  # ~$1.62/mo against the ~$22/mo the ingress change freed. 256 CPU permits
-  # 512 / 1024 / 2048 MB; nothing else in the pair may change independently.
-  memory             = "1024"
+  # 512 MB, measured rather than assumed. This was briefly raised to 1024 on the
+  # theory that sharp/libvips over a 4 MB upload buffer needed the headroom, but
+  # ADR 0003 step 0b measured MemoryUtilization peaking at 12.1% of 1024 MB
+  # (~124 MB) across 60 serial image uploads plus two multimodal calls each —
+  # about 24% of this 512. The headroom was not being used, so the ~$1.62/mo is
+  # not being spent. 256 CPU permits only 512 / 1024 / 2048 MB.
+  #
+  # Revisit if uploads grow: the sample used 521 KB images against a 4 MB multer
+  # cap, and CloudWatch's 1-minute Maximum can miss a sub-minute spike.
+  memory             = "512"
   execution_role_arn = aws_iam_role.ecs_execution.arn
   task_role_arn      = aws_iam_role.ecs_task.arn
 

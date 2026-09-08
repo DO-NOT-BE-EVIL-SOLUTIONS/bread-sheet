@@ -165,3 +165,7 @@ override.tf.json
 *_override.tf.json
 # Plan output
 *.tfplan
+
+# Step 0b latency harness output (server/scripts/measure-gemini-latency.mjs).
+# Raw per-request timings — the summarised result belongs in ADR 0003, not here.
+measure-gemini-*.json

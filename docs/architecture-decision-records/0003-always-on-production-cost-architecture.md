@@ -383,6 +383,40 @@ A tail that reaches 13.8 s in thirty samples will reach further in thirty thousa
 comfortable pass against 20 s and an uncomfortable one against 30 s, which is precisely the margin
 the ingress decision turns on. Run 0b on `dev` before treating the gate as cleared.
 
+#### Step 0b result, 2026-09-08 — **PASS**
+
+Against `dev` through API Gateway (Fargate `256`/`1024` at the time of the run, since reverted to `512`; Vertex via WIF, `GOOGLE_CLOUD_LOCATION=global`),
+one real 1600 px label photo, n=30 serial per endpoint:
+
+| endpoint | n | cold (1st) | min | median | p90 | max | breaches |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `extract-label` | 30 | 12479 | 6449 | 7667 | 10242 | **13433** | 0 |
+| `upload-image` | 30 | 4514 | 2515 | 3284 | 4051 | **4514** | 0 |
+
+Zero budget breaches and zero handler-deadline hits. Max is **67 % of the 20 s inner budget** and
+**45 % of API Gateway's 30 s ceiling**. The gate is cleared.
+
+**The local pre-measurement was an excellent predictor, and the caution attached to it was wrong.**
+Local gave median 7533 / p90 9670 / max 13810; `dev` gave 7667 / 10242 / 13433. The three differences
+that note warned about — 0.25 vCPU Fargate, the WIF token exchange, and region — contributed nothing
+measurable, because the time is dominated by the Vertex round trip. Useful consequence: **this can be
+re-measured locally for free** whenever the prompt, model or image size changes; a cloud run is
+confirmation, not a prerequisite.
+
+Residual risk, stated plainly: a max of 13.4 s at n=30 means the true p99 over thousands of requests
+sits higher, and there is 6.6 s of headroom to the inner budget. A breach is now a clean, retryable
+`503 upstream_timeout` rather than an opaque 504 with the upload lost — which is precisely what
+step 0a bought, and why this is an acceptable margin rather than a comfortable one.
+
+**Memory: the 1 GB bump was not justified.** `MemoryUtilization` peaked at **12.1 % of 1024 MB
+(~124 MB)** across the whole run — under exactly the workload the bump was hypothesised for, 60
+serial image uploads through sharp/libvips and two multimodal calls. At the old 512 MB that same
+peak would have been ~24 %. The recommendation was made from reasoning about libvips rather than
+measurement, and the measurement does not support it. The sample used 521 KB images against a 4 MB
+multer cap, and CloudWatch's 1-minute `Maximum` can miss a sub-minute spike, so this is evidence of
+no pressure rather than proof — but it is enough to revert to `512` and keep the ~$1.62/mo unless
+the single-task-is-the-whole-stage argument is judged worth paying for on its own.
+
 #### Outcomes
 
 * **Max under ~20 s, no breaches** — the budget holds. Proceed with steps 1–6 as written.
@@ -569,14 +603,6 @@ Mirror the existing pattern in `security.tf` — each hop references the previou
   pattern against the database changes shape, and a 12-month commitment to an instance class should
   not be made ahead of that.
 
-### 7. Stamp `prod` from the same root
-
-Once `dev` has come up clean on the new ingress at least once, add `environments/prod.tfvars` +
-`prod.s3.tfbackend` and apply. No new Terraform is written at this step — that is the point of
-keeping both stages on one shape. What differs is `.tfvars` only: `environment = "prod"`, the S3
-bucket name, the GCP WIF pool, and `db_deletion_protection = true` / `db_skip_final_snapshot = false`
-(currently `false` / `true`, which are correct for a disposable `dev` and wrong for `prod`).
-
 ### As built — where reality differed from this plan
 
 Recorded so the `prod` stamp (step 7) does not rediscover any of it. Each of these cost an apply
@@ -631,10 +657,18 @@ cycle or worse.
 * **The keepalive could not be an EventBridge Scheduler rule** as step 4 sketched — Scheduler
   invokes AWS API actions, not arbitrary HTTPS. It is a weekly Lambda instead.
 * Built since: the billing budget (step 6), the VPC-link keepalive (step 4), and the task raised to
-  `256`/`1024` (~$1.62/mo at the measured GB-hr rate) because the single task is now the whole stage.
-* Still outstanding: **API Gateway access logging delivers nothing** — `access_log_settings` applies
-  cleanly but no events reach the log group, so the ingress remains a black box; and step 0b has yet
-  to run against `dev`.
+  `256`/`1024` — then reverted to `512` once step 0b measured the headroom going unused (~124 MB
+  peak). Measure before paying: the bump was reasoned from libvips behaviour, not observed.
+* **Access logging needs no resource policy.** It was briefly believed broken and "fixed" with an
+  `aws_cloudwatch_log_resource_policy`; that was wrong on both counts. Delivery had been working from
+  the first request, and the policy was created 7h40m later — HTTP APIs provision vended log delivery
+  themselves, unlike REST APIs which need the account-level `aws_api_gateway_account` role. The
+  misdiagnosis came from reading `storedBytes`, which CloudWatch recomputes on its own schedule
+  (hours) and reports as `0` on a log stream permanently. **To check delivery, read the events:**
+  `aws logs tail /aws/apigateway/breadsheet-dev-api --since 10m`. Beware `filter-log-events
+  --output text`, which tab-joins messages onto one line and defeats line-based JSON parsing.
+* Step 0b ran against `dev` on 2026-09-08 and passed — see the result table above. The only
+  outstanding step is 7, the `prod` stamp.
 
 ### Not in scope
 
