@@ -309,6 +309,7 @@ The controller (`labelExtractionController.ts`) branches on `getVisionMode()`: `
 | Layer | Budget | Result on breach |
 |---|---:|---|
 | `withGeminiDeadline` on the model call | 20 s | `503 upstream_timeout`, call actually aborted |
+| `withGeminiDeadline`, any other failure | — | `502 upstream_error`, upstream detail logged server-side only |
 | `requestDeadline()` on the route | 25 s | `503 request_timeout` |
 | API Gateway integration timeout (future ingress) | 30 s, fixed | opaque `504`, upload lost — must never be reached |
 

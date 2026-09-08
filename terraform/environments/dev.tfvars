@@ -12,5 +12,5 @@ db_multi_az         = false
 # Live Google Cloud (keyless via AWS-provider Workload Identity Federation)
 enable_google_wif = true
 gcp_project       = "breadsheet-496522"
-gcp_location      = "europe-west1"
+gcp_location      = "global"
 gcp_wif_pool_id   = "breadsheet-dev"

@@ -48,6 +48,33 @@ export class GeminiTimeoutError extends Error implements AppError {
 }
 
 /**
+ * Raised when a Gemini call fails for any reason other than our own deadline.
+ *
+ * This exists because `@google/genai` throws an `ApiError` carrying Google's own
+ * HTTP status, and `errorHandler` does `status = appErr.status ?? 500` — so an
+ * unwrapped upstream failure becomes *our* status verbatim. A Vertex 404 ("model
+ * not published in this region") surfaced to clients as a 404, which in this API
+ * means "product not found"; a Vertex 429 would tell the client to back off for a
+ * rate limit that is not ours.
+ *
+ * A dependency failing is a 502 on our side, never a 4xx: nothing about the
+ * client's request was wrong.
+ */
+export class GeminiUpstreamError extends Error implements AppError {
+  readonly status = 502;
+  readonly code = 'upstream_error';
+
+  constructor(
+    readonly operation: string,
+    readonly elapsedMs: number,
+    options?: { cause?: unknown },
+  ) {
+    super(`Gemini call "${operation}" failed after ${elapsedMs}ms`, options);
+    this.name = 'GeminiUpstreamError';
+  }
+}
+
+/**
  * Run a Gemini call under the deadline budget. The callback receives the
  * `AbortSignal` it must pass to the SDK as `config.abortSignal` — without that
  * the request is not actually cancelled, only abandoned.
@@ -74,6 +101,15 @@ export async function withGeminiDeadline<T>(
       logger.warn('gemini:deadline exceeded', { operation, elapsedMs, budgetMs });
       throw new GeminiTimeoutError(operation, elapsedMs, budgetMs);
     }
-    throw err;
+
+    // Keep the upstream detail server-side; the client gets a generic 502.
+    logger.warn('gemini:call failed', {
+      operation,
+      elapsedMs,
+      errorName: (err as Error)?.name,
+      errorMessage: (err as Error)?.message,
+      upstreamStatus: (err as { status?: unknown })?.status,
+    });
+    throw new GeminiUpstreamError(operation, elapsedMs, { cause: err });
   }
 }

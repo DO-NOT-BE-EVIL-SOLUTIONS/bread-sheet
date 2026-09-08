@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   GEMINI_CALL_TIMEOUT_MS,
   GeminiTimeoutError,
+  GeminiUpstreamError,
   withGeminiDeadline,
 } from './geminiDeadline.js';
 
@@ -53,12 +54,39 @@ describe('withGeminiDeadline', () => {
     expect(timeout.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 
-  it('passes non-timeout failures through untouched', async () => {
+  it('wraps a non-timeout failure as a 502, keeping the original as cause', async () => {
     const upstream = new Error('Vertex said no');
 
-    await expect(
-      withGeminiDeadline('plausibility', () => Promise.reject(upstream), 5_000),
-    ).rejects.toBe(upstream);
+    const err = await withGeminiDeadline(
+      'plausibility',
+      () => Promise.reject(upstream),
+      5_000,
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(GeminiUpstreamError);
+    expect((err as GeminiUpstreamError).status).toBe(502);
+    expect((err as GeminiUpstreamError).code).toBe('upstream_error');
+    expect((err as GeminiUpstreamError).cause).toBe(upstream);
+  });
+
+  it("does not let an upstream SDK error's status become our status", async () => {
+    // Regression: @google/genai throws ApiError with Google's HTTP status, and
+    // errorHandler trusts `err.status`. A Vertex 404 ("model not published in
+    // this region") was surfacing to clients as a 404, which in this API means
+    // "product not found". Observed in dev 2026-09-08.
+    const vertex404 = Object.assign(new Error('Publisher model ... was not found'), {
+      name: 'ApiError',
+      status: 404,
+    });
+
+    const err = await withGeminiDeadline(
+      'label-extraction',
+      () => Promise.reject(vertex404),
+      5_000,
+    ).catch((e: unknown) => e);
+
+    expect((err as GeminiUpstreamError).status).toBe(502);
+    expect((err as GeminiUpstreamError).status).not.toBe(404);
   });
 
   it('leaves the default budget below the 25s request deadline', () => {

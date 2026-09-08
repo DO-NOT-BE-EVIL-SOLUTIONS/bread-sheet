@@ -300,6 +300,11 @@ console.log(`requests   ${N} per endpoint, serial`);
 console.log('\nFire the first requests right after a task restart so a cold Vertex');
 console.log('connection and the WIF token exchange land inside the sample.\n');
 
+// The window the CloudWatch MemoryUtilization query needs. Printed at both ends
+// so it survives terminal scrollback, and substituted into the command below.
+const startedAt = new Date();
+console.log(`started    ${startedAt.toISOString()}`);
+
 const results = [];
 const allRuns = {};
 for (const endpoint of endpoints) {
@@ -324,21 +329,34 @@ for (const endpoint of endpoints) {
   allRuns[endpoint] = runs;
 }
 
-const outPath = `measure-gemini-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+const finishedAt = new Date();
+const outPath = `measure-gemini-${finishedAt.toISOString().replace(/[:.]/g, '-')}.json`;
 await writeFile(
   outPath,
   JSON.stringify(
-    { baseUrl: BASE_URL, image: { bytes: image.length, source }, n: N, runs: allRuns },
+    {
+      baseUrl: BASE_URL,
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      image: { bytes: image.length, source },
+      n: N,
+      runs: allRuns,
+    },
     null,
     2,
   ),
 );
-console.log(`\nRaw timings written to ${outPath}`);
+console.log(`\nstarted    ${startedAt.toISOString()}`);
+console.log(`finished   ${finishedAt.toISOString()}`);
+console.log(`Raw timings written to ${outPath}`);
 
 console.log('\nTask memory is the other half of step 0b — grab it for the same window:');
 console.log('  aws cloudwatch get-metric-statistics --namespace AWS/ECS \\');
 console.log('    --metric-name MemoryUtilization --statistics Maximum --period 60 \\');
-console.log('    --start-time <ISO> --end-time <ISO> \\');
+console.log(
+  `    --start-time ${new Date(startedAt.getTime() - 60_000).toISOString()} ` +
+    `--end-time ${new Date(finishedAt.getTime() + 60_000).toISOString()} \\`,
+);
 console.log('    --dimensions Name=ClusterName,Value=$(cd terraform && terraform output -raw ecs_cluster_name) \\');
 console.log('                 Name=ServiceName,Value=$(cd terraform && terraform output -raw ecs_service_name)');
 console.log('Above ~75% of the 512 MB task, raise it to 1 GB as part of ADR step 2.');
