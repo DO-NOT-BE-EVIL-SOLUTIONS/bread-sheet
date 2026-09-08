@@ -1402,6 +1402,25 @@ implement adr 0003, but make changes for dev - target is identical setup for dev
 - [ ] `/dev-team <TICKET-ID>` does the same from a Claude Code session.
 - [ ] Both runs' findings docs and guardrail behavior (worktree isolation, reviewer-only PR, bounded retry) are compared and any drift between the two harnesses is fixed or documented.
 
+### [TICKET-P9-005] Agentic Exploratory QA Environment
+**Goal:** An environment where an LLM agent drives the real app on an emulator, explores it against a charter rather than a script, and produces bug reports as GitHub issues — the surface neither Playwright (no camera, no backend behind it) nor the Maestro flows (pre-written assertions) can reach.
+**Context:** Replaces the "E2E Testing Flow - Agents can run and control emulators" note that previously sat in Future Plans. Full design in `docs/P9-005-implementation-plan.md`. Two constraints drive it: the agent needs a perception/action loop (`maestro hierarchy` for structure, `adb exec-out screencap` for pixels, `adb shell input` + `breadsheet://` deep links to act), and per ADR 0004 the setup must not be Claude-specific. That rules out driving it through one harness's shell and image tools, so the driver is a library behind an **MCP stdio server** the coordinator spawns outside the agent's sandbox — the exposed tool list becomes the agent's whole capability list, with no generic shell tool. Reuses `bread-sheet-app/scripts/test-maestro.js` (P9-003) via a new `--session` mode rather than rewriting it. Blocked-ish on P9-002: both want a dedicated throwaway Supabase project, since `signInAnonymously()` is the only auth path and has no mock.
+**Implementation:**
+- Determinism first (`server/`): `OFF_MODE=live|mock` (the Open Food Facts call has no mode flag today), a `prisma/seed.ts` fixture set, `LOG_FORMAT=pretty|json` split from `NODE_ENV`, config-driven rate limits.
+- `--session` / `--session-down` in `test-maestro.js`; extract its SDK/Java/adb resolution into `scripts/lib/android.js`.
+- `scripts/qa-driver/` — library + MCP stdio server + CLI. `describe` (structured text of the screen) must complete a charter unaided; screenshots are evidence always, model input only under `QA_VISION=on`.
+- `agent-team/`: `qa-guardrails.md`, `qa-handoff.ts` (Zod finding schema), `qa-agent.ts` via `@mastra/mcp`, `AGENT_MODEL_QA`, `npm run qa-team`. Claude Code gets `.mcp.json` + `/qa-run` as one consumer among several.
+- Charters in `docs/qa/charters/`, seeded-defect evals in `docs/qa/evals/` (`npm run qa-eval`) scoring providers on found/missed/false-positive/cost.
+- Hosts: self-hosted runner on the Mac mini (`.github/workflows/qa-explore.yml`, nightly), parity on the CachyOS PC. macOS gaps: JDK discovery under `/Library/Java/JavaVirtualMachines`, `-gpu host` on Apple silicon, and the Linux-only podman socket in `docker-compose.yml`.
+**Acceptance Criteria:**
+- [ ] A real session runs end to end: guest sign-in → deep-link a seeded barcode → product screen → rate → `reset` reproduces it.
+- [ ] The same charter completes on two providers — one via the MCP server from a Claude Code session, one via `npm run qa-team` on a non-Anthropic model.
+- [ ] `npm run qa-eval` finds the seeded defect and produces a working repro; at least one `QA_VISION=off` run passes.
+- [ ] The QA agent needs no new sandbox binds (no Android SDK, no Maestro, no `~/.android`) and the server exposes no generic shell tool.
+- [ ] A confirmed finding becomes a GitHub issue with a replayable repro, filed by the coordinator rather than the agent.
+- [ ] Session and eval both run on the Mac mini and the CachyOS PC.
+- [ ] `test:e2e` and `test:maestro` still green after the `scripts/lib/android.js` extraction.
+
 # Future Plans and Ideas
 
 ## ADR 003 - Improve operations cost!!!
@@ -1409,9 +1428,6 @@ implement adr 0003, but make changes for dev - target is identical setup for dev
 
 ## Evaluate if Gemma 4 is cheaper for image recognition (both api and self hosting)
 see title
-
-## E2E Testing Flow - Agents can run and control emulators
-Setup works on a local mac mini and on cachyos desktop pc
 
 ## Taskfiles for local setup on any OS
 Create taskfiles for local setup and fixture example data set. Adapt readme (and shorten it - move info in apropriate docs and just link there)

@@ -2,8 +2,7 @@
 
 **Date:** 2026-09-08
 **Branch:** TBD (target: `main`)
-**Ticket:** [TICKET-P9-005] Agentic Exploratory QA Environment *(to be added to `FEATURES.md`,
-replacing the "E2E Testing Flow - Agents can run and control emulators" future-plans note)*
+**Ticket:** [TICKET-P9-005] Agentic Exploratory QA Environment
 
 ---
 
