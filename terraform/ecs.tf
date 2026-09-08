@@ -28,9 +28,15 @@ resource "aws_ecs_task_definition" "server" {
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = "256"
-  memory                   = "512"
-  execution_role_arn       = aws_iam_role.ecs_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+  # 1 GB, not the Fargate minimum of 512 MB. This single task IS the stage now
+  # that the ALB is gone, so an OOM is an outage rather than a shed target — and
+  # the server runs sharp/libvips over a multer memoryStorage buffer capped at
+  # 4 MB. Measured from the July bill ($1.32 / 297 GB-hr), the extra 0.5 GB costs
+  # ~$1.62/mo against the ~$22/mo the ingress change freed. 256 CPU permits
+  # 512 / 1024 / 2048 MB; nothing else in the pair may change independently.
+  memory             = "1024"
+  execution_role_arn = aws_iam_role.ecs_execution.arn
+  task_role_arn      = aws_iam_role.ecs_task.arn
 
   runtime_platform {
     cpu_architecture        = "X86_64"
@@ -38,7 +44,7 @@ resource "aws_ecs_task_definition" "server" {
   }
 
   container_definitions = jsonencode([{
-    name      = "server"
+    name = "server"
     # Consumed at CREATE only — `ignore_changes = [container_definitions]` below means CI's
     # push-deployed revisions are invisible to Terraform, so this pin drifts behind the live
     # service. It is the image the stack comes back on after a Tier 3 pause; re-point it at the
@@ -54,10 +60,10 @@ resource "aws_ecs_task_definition" "server" {
     command = ["sh", "scripts/start.sh"]
 
     healthCheck = {
-      command     = ["CMD-SHELL", "wget -q -O- http://localhost:3000/ || exit 1"]
-      interval    = 30
-      timeout     = 5
-      retries     = 3
+      command  = ["CMD-SHELL", "wget -q -O- http://localhost:3000/ || exit 1"]
+      interval = 30
+      timeout  = 5
+      retries  = 3
       # Replaces health_check_grace_period_seconds (ALB-only, now removed).
       # Must cover scripts/start.sh running `npm run db:deploy` before the
       # server listens — that is why it is 150 and not the ALB's 120.
