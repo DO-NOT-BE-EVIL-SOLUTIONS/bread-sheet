@@ -52,3 +52,17 @@ output "route53_nameservers" {
   description = "NS records to delegate from the parent zone."
   value       = aws_route53_zone.dev.name_servers
 }
+
+output "billing_alerts_topic_arn" {
+  description = <<-EOT
+    SNS topic the budget publishes to. Subscribers are added out of band so no
+    address lands in the repo or in Terraform state:
+
+      aws sns subscribe --topic-arn <this> --protocol email \
+        --notification-endpoint you@example.com
+
+    Then confirm via the emailed link — until that is done the subscription is
+    pending and nothing is delivered.
+  EOT
+  value       = aws_sns_topic.billing_alerts.arn
+}

@@ -119,3 +119,15 @@ variable "gcp_wif_pool_id" {
   description = "Workload Identity Pool ID for Fargate."
   default     = "breadsheet-dev"
 }
+# ── Billing guardrail (ADR 0003 step 6) ───────────────────────────────────────
+
+variable "budget_limit_usd" {
+  type        = string
+  description = <<-EOT
+    Monthly cost budget in USD, tax included. The dev stage runs to roughly $34/mo
+    (Fargate ~$9, RDS + storage ~$15, one public IPv4 ~$3.65, public + Cloud Map
+    private hosted zones ~$1, Secrets Manager ~$0.40, plus per-request API Gateway
+    and CloudWatch), so the default leaves ~30% headroom before it fires.
+  EOT
+  default     = "45"
+}
