@@ -231,6 +231,8 @@ terraform/
   gcp-wif.tf      # GCP WIF pool + AWS provider + SA + bindings
   budget.tf       # SNS billing_alerts topic (+ its consolidated access policy) + monthly AWS budget
   detection.tf    # ADR 0005 D: Cost Anomaly Detection, API Gateway + GeminiCalls alarms, GCP budget
+  l4.tf           # ADR 0005 L4: RDS-stop budget action (AWS) + Pub/Sub-triggered billing-detach
+                  # Cloud Function (GCP) — source at functions/billing-killswitch/
   outputs.tf      # Useful references (URLs, ARNs, names)
   environments/
     dev.tfvars           # Variable values for dev
@@ -364,10 +366,9 @@ second `aws_sns_topic_policy`):
   default, and `billingbudgets.googleapis.com` (unlike the WIF-only APIs used until now) requires one.
 
 **L2** (the in-process daily Gemini counter) has since landed — see `backend.md` § Daily call cap.
-**L5** (CloudFront flat-rate Free plan + OAC over the image bucket, the only layer that removes a
-meter rather than choosing a number) is applied — distribution, OAC and WAF ACL are live and image
-reads are verified end to end through CloudFront. The one thing left is the Free plan subscription
-itself, a manual console step; see § CloudFront images distribution below.
+**L5** (CloudFront flat-rate Free plan + OAC over the image bucket) is fully applied, Free plan
+subscription included — see § CloudFront images distribution below. **L4** (the AWS RDS-stop budget
+action and the GCP billing-detach Cloud Function) has also landed — see § L4 backstops below.
 
 ### CloudFront images distribution (ADR 0005 L5)
 
@@ -426,6 +427,69 @@ aws ecs update-service --cluster breadsheet-server-dev \
   --service breadsheet-dev-server-service \
   --task-definition breadsheet-dev-server --force-new-deployment
 ```
+
+### L4 backstops (ADR 0005)
+
+`terraform/l4.tf` — the "everything else failed and nobody was looking" tier, one hard stop per
+vendor. Applied and verified 2026-09-09.
+
+**AWS: stop RDS at 150% of budget.** `aws_budgets_budget_action.stop_rds` is a `RUN_SSM_DOCUMENTS`
+action (`STOP_RDS_INSTANCES` against `aws_db_instance.main`), `AUTOMATIC` approval — a backstop that
+needs a click isn't a backstop. Its execution role attaches AWS's own managed policy for this exact
+scenario, `AWSBudgetsActions_RolePolicyForResourceAdministrationWithSSM`, rather than a hand-rolled
+one: EC2/RDS start-stop conditioned on `aws:CalledVia = ssm.amazonaws.com`, plus
+`ssm:StartAutomationExecution` scoped to the four AWS-owned `AWS-{Start,Stop}{EC2,Rds}Instance`
+documents.
+
+**GCP: detach billing at €40 actual.** `google_billing_budget.dev` (`detection.tf`) — the same budget
+resource D's fractional thresholds already use, not a second one — gained a fourth `threshold_rules`
+block at `threshold_percent = 1.0` and an `all_updates_rule { pubsub_topic = ... }`. Every budget
+notification (several times a day, per Google's own docs, regardless of whether a threshold was
+actually crossed) lands on `google_pubsub_topic.billing_killswitch`; the Cloud Function at
+`terraform/functions/billing-killswitch/index.js` is what turns that stream into a one-shot action —
+a no-op unless `costAmount > budgetAmount`, and only then calling
+`cloudbilling.projects.updateBillingInfo` with an empty `billingAccountName`.
+
+Three things that only showed up when this was actually applied, not just written:
+
+* **`var.gcp_location` (`"global"`, for Vertex AI model routing) is not a real region.** GCS, Cloud
+  Functions and Eventarc all rejected it outright. The function's resources use their own literal
+  region (`europe-west1`, `local.l4_function_region` in `l4.tf`) — unrelated to Vertex's location
+  choice despite the shared variable in spirit.
+* **A GCP org-policy change means the default Compute Engine SA no longer auto-gets the role Cloud
+  Build needs for gen2 function builds.** First apply failed with "missing permission on the build
+  service account." Rather than widen the shared default compute SA, `build_config.service_account`
+  points at the killswitch SA itself (granted `roles/cloudbuild.builds.builder`) — one identity for
+  build, trigger and detach, nothing shared with unrelated deployments.
+* **A gen2 Pub/Sub trigger on a non-default SA needs three separate IAM grants**, and skipping any one
+  produces `run.routes.invoke` 401s that Terraform never surfaces as an error — the resources apply
+  cleanly and just silently never deliver: `roles/eventarc.eventReceiver` (project) on the trigger SA,
+  `roles/run.invoker` **on the function's own Cloud Run service specifically** (not project-wide) for
+  the same SA, and `roles/iam.serviceAccountTokenCreator` **granted to the killswitch SA, held by the
+  Pub/Sub service agent** (`service-<project-number>@gcp-sa-pubsub.iam.gserviceaccount.com`) so
+  Pub/Sub can mint the tokens push delivery needs.
+
+**Verified without ever detaching real billing.** Two synthetic messages were published straight to
+the topic after apply:
+
+```sh
+gcloud pubsub topics publish breadsheet-dev-billing-killswitch --project=breadsheet-496522 \
+  --message='{"budgetDisplayName":"breadsheet-dev-gemini-budget","costAmount":1.23,"budgetAmount":40,"currencyCode":"EUR"}'
+```
+
+Function logs (`gcloud functions logs read breadsheet-dev-billing-killswitch --project=breadsheet-496522
+--region=europe-west1 --gen2`) showed both received, parsed, and correctly resolved to "under budget,
+no action" — confirming the full chain (Pub/Sub → Eventarc → Cloud Run → function logic) without ever
+calling `updateBillingInfo`. The `roles/billing.admin` grant this layer depends on
+(`google_billing_account_iam_member.killswitch_admin`, on the real billing account, scoped to the
+account rather than the project — there is no narrower standard role for this API) was never exercised
+in anger; there is no safe way to test the actual detach short of detaching real billing.
+
+**This does not reverse itself, deliberately.** A real trip leaves the project with no billing account
+attached — every Google service stops, Vertex/Gemini included — until someone manually reattaches one
+(`gcloud billing projects link <project> --billing-account=<id>`, or the console). `terraform apply`
+will not undo it. That is the point of a hard stop: a human has to consciously reverse it, not have
+Terraform quietly smooth it over.
 
 ### VPC link keepalive
 

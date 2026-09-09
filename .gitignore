@@ -160,6 +160,9 @@ crash.*.log
 !terraform/environments/*.tfvars
 # Override files
 override.tf
+# Cloud Function source zips built by data.archive_file (ADR 0005 L4) — generated,
+# not source; the function code that matters lives in functions/*/index.js.
+terraform/functions/*.zip
 override.tf.json
 *_override.tf
 *_override.tf.json

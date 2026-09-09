@@ -132,13 +132,13 @@ resource "aws_cloudwatch_metric_alarm" "gemini_calls_high" {
 
 # ──────────── GCP budget alert ──────────────────────────────────────────────────
 # The Google bill is invisible to every AWS control above. $40 mirrors L4's
-# eventual hard-stop trigger (ADR step 7, not yet wired — this resource carries
-# no Pub/Sub topic yet, so today it only emails). Thresholds at $2/$5/$10 actual
-# give a same-day signal on a runaway long before the $32.40/mo L2 ceiling, let
-# alone the $40 backstop. No all_updates_rule/notification channel is set, so
-# GCP falls back to emailing the billing account's IAM recipients — currently
-# roles/billing.admin on the account, i.e. breadsheet@pm.me — which is the
-# "email thresholds" this step asks for.
+# hard-stop trigger (ADR step 7, l4.tf — the 100% threshold_rules block below
+# is what that layer fires on). Thresholds at $2/$5/$10 actual give a same-day
+# signal on a runaway long before the $32.40/mo L2 ceiling, let alone the $40
+# backstop. Email notification is untouched — GCP still emails the billing
+# account's IAM recipients (roles/billing.admin, i.e. breadsheet@pm.me) on
+# every threshold — the all_updates_rule below adds a second channel (Pub/Sub)
+# rather than replacing the first.
 
 resource "google_project_service" "billingbudgets" {
   project = var.gcp_project
@@ -185,5 +185,25 @@ resource "google_billing_budget" "dev" {
     spend_basis       = "CURRENT_SPEND"
   }
 
-  depends_on = [google_project_service.billingbudgets]
+  # ADR 0005 L4 (l4.tf): the hard-stop trigger. Every other threshold above is
+  # "tell a person"; this one is "detach billing" — deliberately at 100% of
+  # the same €40/$40 budget the D thresholds are fractions of, not a separate
+  # number, so there is exactly one budget to reason about.
+  threshold_rules {
+    threshold_percent = 1.0 # €40 — L4's hard-stop trigger
+    spend_basis       = "CURRENT_SPEND"
+  }
+
+  # Second notification channel alongside the default email recipients (not a
+  # replacement — disable_default_iam_recipients is left at its default
+  # false). Every threshold above, not just the 100% one, publishes here; the
+  # Cloud Function (l4.tf) evaluates costAmount vs budgetAmount itself and is
+  # a no-op below 100%, per Google's own docs: budget notifications are sent
+  # "multiple times per day with the current status of your budget", not only
+  # on a crossing.
+  all_updates_rule {
+    pubsub_topic = google_pubsub_topic.billing_killswitch.id
+  }
+
+  depends_on = [google_project_service.billingbudgets, google_project_service.pubsub]
 }
