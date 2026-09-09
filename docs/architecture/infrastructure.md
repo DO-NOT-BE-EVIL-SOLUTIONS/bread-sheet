@@ -160,7 +160,7 @@ ALB was retired to remove its ~\$18/mo flat charge plus two per-AZ public IPv4 a
 | Service discovery | Cloud Map private DNS namespace `breadsheet-dev.local`, service `server` | **SRV** records, TTL 15 — API Gateway's `DiscoverInstances` needs IP *and* port, and an A record carries no port. `health_check_custom_config` must be non-empty (`failure_threshold = 1`, deprecated but required) or AWS stores `null` and every plan re-replaces the service. |
 | Compute | ECS **Fargate** service `breadsheet-dev-server-service` on cluster `breadsheet-server-dev` | Desired 1, `256`/`512`, **X86_64** (image is `linux/amd64`), `assignPublicIp=ENABLED`, rolling deploy + circuit-breaker rollback. Liveness is a **container `healthCheck`** (`wget`, not `curl` — the `node:24-alpine` runtime image has no curl) with `startPeriod = 150` to cover `scripts/start.sh` running `npm run db:deploy` before the server listens. `health_check_grace_period_seconds` was ALB-only and went with it; without the target group, this health check is the *only* thing that detects a wedged task and the only signal ECS reports into Cloud Map. Memory is the 512 MB minimum, measured rather than assumed: it was briefly raised to 1 GB on the theory that sharp/libvips needed the headroom, but ADR 0003 step 0b measured `MemoryUtilization` peaking at ~124 MB (about 24% of 512) across 60 serial image uploads. 256 CPU permits only 512 / 1024 / 2048 MB. Revisit if uploads grow — the sample used 521 KB images against a 4 MB multer cap. |
 | Database | RDS PostgreSQL `db.t4g.micro`, single-AZ, private, encrypted | Reachable only from the task SG on `5432`. Keyless RDS IAM auth (`DB_AUTH=iam`) via `@aws-sdk/rds-signer` — see [ADR 0002](../architecture-decision-records/0002-rds-database-credentials.md). |
-| Images | S3 bucket `breadsheet-dev-s3-…` | `raw/*` private (task `s3:PutObject` only), `processed/*` scoped public-read; resize Lambda deferred. |
+| Images | S3 bucket `breadsheet-dev-s3-…` behind a CloudFront distribution | `raw/*` private (task `s3:PutObject` only); `processed/*` reads go through CloudFront + OAC only — the bucket itself has no public policy (ADR 0005 L5, § CloudFront images distribution below). Resize Lambda deferred. |
 | Image registry | GHCR `ghcr.io/fabelhaft-io/bread-sheet-server` (public) | **Not ECR** — the execution role needs no pull secret. |
 | Secrets | SSM Parameter Store `/breadsheet/dev/*` | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_DEFAULT_KEY`; injected into the container via the task-def `secrets` block by the **execution** role. `DATABASE_URL` is no longer a secret (keyless IAM auth — no password). |
 | Identity | IAM execution + task + deployer roles, GitHub OIDC provider | All keyless. Task role = the app's identity (S3, `rds-db:connect`, + the principal GCP WIF federates). Deployer assumed by CI via OIDC. |
@@ -221,6 +221,7 @@ terraform/
   rds.tf          # DB subnet group + RDS instance
   iam.tf          # execution / task / deployer roles, policies, GitHub OIDC provider
   s3.tf           # images bucket + public-access-block + ownership + policy + CORS
+  cloudfront.tf   # ADR 0005 L5: OAC + WAF web ACL + CloudFront distribution over the images bucket
   ssm.tf          # SSM parameters (Supabase URL + key)
   ecs.tf          # ECS cluster + task definition + service
   api-gateway.tf  # HTTP API + VPC link + integration + $default route/stage (+ throttled upload-image
@@ -362,10 +363,69 @@ second `aws_sns_topic_policy`):
   `google` provider sets `billing_project`/`user_project_override` — local ADC has no quota project by
   default, and `billingbudgets.googleapis.com` (unlike the WIF-only APIs used until now) requires one.
 
-Both remain to land per the ADR's ordering: **L2** (the in-process daily Gemini counter — the layer
-that actually bounds the Google spend, since Vertex quotas are per-minute and a rate throttle can't
-express "per day") and **L5** (CloudFront flat-rate Free plan + OAC over the image bucket, the only
-layer that removes a meter rather than choosing a number).
+**L2** (the in-process daily Gemini counter) has since landed — see `backend.md` § Daily call cap.
+**L5** (CloudFront flat-rate Free plan + OAC over the image bucket, the only layer that removes a
+meter rather than choosing a number) is applied — distribution, OAC and WAF ACL are live and image
+reads are verified end to end through CloudFront. The one thing left is the Free plan subscription
+itself, a manual console step; see § CloudFront images distribution below.
+
+### CloudFront images distribution (ADR 0005 L5)
+
+`cloudfront.tf` fronts the images bucket with a CloudFront distribution so image egress stops being
+an unbounded `$0.09/GB` S3 charge (`s3.tf`'s old `Principal: "*"` statement) and becomes something a
+flat-rate plan can put a hard `$0` ceiling on. Three pieces, all required together:
+
+1. **Origin Access Control (OAC)** (`aws_cloudfront_origin_access_control.images`) plus a rewritten
+   `aws_s3_bucket_policy.images` (`s3.tf`) that only allows `s3:GetObject` from the distribution's
+   own service-principal identity (`Condition.StringEquals["AWS:SourceArn"]`). The bucket has **no
+   public policy statement at all** any more — a direct `https://<bucket>.s3....amazonaws.com/...`
+   URL now 403s; only requests through the distribution succeed. `aws_s3_bucket_public_access_block`
+   was tightened to match (`block_public_policy`/`restrict_public_buckets` → `true`).
+2. **A WAF web ACL** (`aws_wafv2_web_acl.images`, empty rule set) — mandatory precondition for the
+   flat-rate plan below, not optional. WAFv2 web ACLs scoped `CLOUDFRONT` only exist in the
+   **us-east-1** API regardless of the distribution's actual footprint, so this reuses the same
+   `aws.use1` provider alias as the Cost Anomaly monitor in `detection.tf`.
+3. **`ASSET_BASE_URL`** moves from the S3 bucket's own hostname to the distribution's `*.cloudfront.net`
+   domain (`ecs.tf`) — a **task environment variable**, so it needs the forced-replacement dance in
+   § Changing a task environment variable above, not a plain `terraform apply`.
+
+**What Terraform cannot do: subscribe the distribution to the Free plan.** Confirmed two ways — the
+installed `aws` provider (`~> 6.39`) has no `pricing_plan`-shaped argument anywhere in its schema
+(`aws_cloudfront_distribution`, `aws_cloudfront_connection_group`, `aws_cloudfront_distribution_tenant`
+all checked), and [AWS's own docs](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/flat-rate-pricing-plan.html#manage-your-pricing-plans)
+say plan management is console / AWS CLI / **PricingPlanManager API** only — a separate API surface
+this provider version doesn't wrap. **Done for `dev`** (2026-09-09, manual console step):
+
+```
+AWS Console → CloudFront → Distributions → <images_cdn_distribution_id> → Manage Plan → Free
+```
+
+`dev`'s image egress is now the structural \$0 this layer is for, not pay-as-you-go-but-cheap.
+
+**`prod` needs this repeated by hand.** `environments/prod.tfvars` doesn't exist yet (ADR 0003 step 7
+hasn't been reached), but when it is, `cloudfront.tf` provisions `prod`'s own distribution/OAC/WAF ACL
+automatically (it's `local.name_prefix`-keyed, nothing `dev`-specific) — the Free plan subscription
+does **not** carry over, since it's per-distribution and spends the account's second Free plan (of 3;
+`dev` used the first). Before subscribing `prod`, re-decide the caveat below for a user-facing stage
+rather than silently reusing `dev`'s choice — see ADR 0005 § L5 for the two-line decision this needs.
+
+**Deploy ordering matters, and bit us once already (2026-09-09).** Applying the bucket-policy change
+before the task is redeployed with the new `ASSET_BASE_URL` breaks every image in the app for however
+long that gap lasts — the old S3 URL 403s the moment the policy lands, and nothing serves the new
+CloudFront URL until the forced task replacement rolls out. Worse, the first `-replace` attempt during
+this rollout used the stale image pin still in `ecs.tf` at the time, silently redeploying an older
+commit whose migration step crashed on every launch (`P1013: invalid port number` in the RDS IAM
+token) — ECS's circuit breaker rolled each attempt back automatically, so the service stayed up, but
+the image gap stayed open for longer than it should have. **Update the image pin to the currently-live
+tag before running `-replace` on the task definition, every time**, then do both steps back to back:
+
+```sh
+terraform apply -var-file=environments/dev.tfvars
+terraform apply -var-file=environments/dev.tfvars -replace=aws_ecs_task_definition.server
+aws ecs update-service --cluster breadsheet-server-dev \
+  --service breadsheet-dev-server-service \
+  --task-definition breadsheet-dev-server --force-new-deployment
+```
 
 ### VPC link keepalive
 

@@ -608,12 +608,66 @@ Result: **image egress becomes structurally \$0.** Not alarmed, not throttled �
 run. The only residual is S3 GETs on cache misses, and because `processed/{uuid}.jpg` is
 content-addressed and never mutated, a long TTL collapses those to roughly one per object per edge.
 
+**Implemented (2026-09-09) as `terraform/cloudfront.tf`.** OAC + a rewritten `s3.tf` bucket policy
+(scoped to the distribution's `AWS:SourceArn`, no `Principal: "*"` statement left at all) + an empty
+`aws_wafv2_web_acl` (scope `CLOUDFRONT`, so it has to be created via the `aws.use1` alias — the same
+us-east-1-only constraint D's Cost Anomaly monitor hits) + `ASSET_BASE_URL` repointed at the
+distribution's `*.cloudfront.net` domain. **One correction the plan above didn't anticipate: the Free
+plan subscription itself is not Terraform-expressible.** Checked against both the installed `aws`
+provider's schema (no `pricing_plan` argument on `aws_cloudfront_distribution`, no
+`aws_pricingplanmanager_*` resource in `~> 6.39`) and AWS's own docs, which say plan management is
+console / AWS CLI / **PricingPlanManager API** only — a surface this provider version doesn't wrap.
+Terraform builds and wires everything the plan *requires* (OAC, the mandatory attached WAF ACL); the
+subscription itself is a one-time manual console step (`infrastructure.md` § CloudFront images
+distribution has the exact path).
+
+**Applied (2026-09-09), two corrections the plan above didn't anticipate:**
+
+* **`aws_wafv2_web_acl.description` rejects em dashes and parentheses.** AWS's validation regex for
+  the field is `^[\w+=:#@/\-,\.][\w+=:#@/\-,\.\s]+[\w+=:#@/\-,\.]$` — word characters, `+=:#@/,.-` and
+  whitespace only. The first two apply attempts failed with a `ValidationException` from plain prose
+  in the description; fixed by writing it in that character set.
+* **`-replace`ing the task definition silently reverts the container image to the stale pin in
+  `ecs.tf`.** The comment already on that line warned about exactly this ("this pin drifts behind the
+  live service") and it was missed anyway: the first `-replace` + force-new-deployment rolled the live
+  image from CI's latest (`04c6a55d…`, the one actually running) back to the hardcoded `25f6411c…`
+  pin — an older commit predating some part of the current DB connection path. Every task launched
+  from it crashed inside `scripts/start.sh`'s `prisma migrate deploy` with `P1013: invalid port number
+  in database URL` (the RDS IAM token, malformed) and ECS's deployment circuit breaker correctly
+  auto-rolled back to the previous revision each time — the service never went down, but the new
+  `ASSET_BASE_URL` never landed either, so images stayed 403'd (the bucket policy had already
+  switched to OAC-only) until the pin was corrected to the live image tag and `-replace` re-run.
+  **Takeaway: update the image pin to the currently-running tag before any `-replace` of this
+  resource**, not just when resuming from a Tier-3 pause as the existing comment says.
+
+Both are now live: distribution `E2Z86B0PMDNJX7` at `d2gnt4hslkw044.cloudfront.net`, verified
+end-to-end (a real `processed/*.jpg` key returns `200 image/jpeg` through CloudFront, the old direct
+S3 URL returns `403`). **The Free plan subscription itself is also done** (manual console step,
+2026-09-09) — `dev`'s image egress is now the structural \$0 this layer is for, not just
+pay-as-you-go-but-cheap.
+
 **Caveats, honestly.** The Free plan's 100 GB / 1M requests is far smaller than the pay-as-you-go
 always-free tier (1 TB / 10M): normal `dev` traffic sits well inside it, but an attack exhausts it in
 minutes and the consequence is *degraded delivery, not a bill*. For a dev stage that is the right
 trade — for `prod` (ADR 0003 step 7) it needs re-deciding, since degraded delivery is a real user
 harm. Plan eligibility depends on historical CloudFront usage; this account has none, so a fresh
 distribution qualifies.
+
+**Step for the `prod` cutover (ADR 0003 step 7, not yet reached — no `environments/prod.tfvars`
+exists).** `cloudfront.tf`'s resources are environment-agnostic (`local.name_prefix`-keyed, no
+hardcoded `dev`), so `prod` gets its own OAC + distribution + WAF ACL for free the moment `prod` is
+stamped from this same Terraform root. Two things do **not** carry over automatically and need doing
+again by hand, once, for `prod` specifically:
+
+1. **The Free plan subscription is per-distribution, not account-wide.** `prod`'s distribution needs
+   its own console visit (`AWS Console → CloudFront → Distributions → <prod distribution> → Manage
+   Plan → Free`) — this spends the account's **second** Free plan (of 3; `dev` used the first).
+2. **Re-decide the degraded-delivery trade before subscribing `prod`.** The caveat above is not
+   theoretical for `prod`: an exhausted 100 GB/1M-request allowance degrades delivery rather than
+   billing, which is fine for a hobby dev stage and a real user-facing harm for `prod`. Either accept
+   that trade explicitly for `prod` too, or subscribe `prod`'s distribution to a paid tier (Pro/Business,
+   larger allowance, still flat-rate/no-overage) instead of Free — decide this as part of ADR 0003
+   step 7, not by silently reusing the `dev` choice.
 
 ## Phase 2 — CloudFront over the API: geo-restriction and per-client rate limiting
 
@@ -725,7 +779,7 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 | 3 | **L1** — `default_route_settings` 5 rps / burst 25; explicit upload route at 1 rps / burst 5, with the "exists to be throttled" comment | `terraform/api-gateway.tf` | ✅ |
 | 4 | **D** — Cost Anomaly monitor + subscription, API Gateway `Count` alarm, log metric filter + `GeminiCalls` alarm, all → `billing_alerts`; GCP budget with email thresholds | `terraform/`, GCP console | ✅ |
 | 5 | **L2** — `GeminiDailyUsage` Prisma model + migration, reservation function beside `geminiDeadline.ts`, `GEMINI_DAILY_CALL_CAP` in `config.ts` (fail-fast, validated integer), `503 daily_quota_exhausted`, tests incl. concurrency and fail-closed; `CLAUDE.md` env-var block, `backend.md`, Bruno docs for the new 503 | `server/` | ✅ |
-| 6 | **L5** — distribution + OAC + WAF ACL + Free plan subscription; remove `PublicReadAllowProcessed`; `ASSET_BASE_URL` → distribution domain (task env var: forced replacement); fix `rds.tf` to use `var.db_max_allocated_storage` while in the file | `terraform/`, `infrastructure.md` | ☐ |
+| 6 | **L5** — distribution + OAC + WAF ACL + Free plan subscription; remove `PublicReadAllowProcessed`; `ASSET_BASE_URL` → distribution domain (task env var: forced replacement); fix `rds.tf` to use `var.db_max_allocated_storage` while in the file | `terraform/`, `infrastructure.md` | ✅ applied (distribution live, verified end-to-end); ✅ Free plan console step |
 | 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `terraform/budget.tf` | ☐ |
 | 8 | Raise `GEMINI_DAILY_CALL_CAP` on `dev` to 300 once step 2 confirms ~\$0.0036/call | task env | ☐ |
 | P2 | **Phase 2** — API distribution on Free plan 2: WAF geo `DE` + rate rule + header insertion secret, `disable_execute_api_endpoint`, `us-east-1` cert, DNS alias; CI allow path | `terraform/`, `server/app.ts`, `.github/workflows/test-native-e2e.yml` | after Phase 1 |
