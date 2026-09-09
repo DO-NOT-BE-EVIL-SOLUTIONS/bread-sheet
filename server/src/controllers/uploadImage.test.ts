@@ -78,7 +78,10 @@ vi.mock('../middlewares/authMiddleware.js', () => ({
     req.user = session.user;
     next();
   },
-  requireRegistered: (_req: any, _res: any, next: any) => next(),
+  requireRegistered: (req: any, res: any, next: any) => {
+    if (req.user?.isAnonymous) return res.status(403).json({ error: 'Registration required' });
+    next();
+  },
 }));
 
 vi.mock('../middlewares/rateLimit.js', () => ({
@@ -286,19 +289,19 @@ describe('POST /api/products/upload-image', () => {
     expect(mockUploadImageToS3).toHaveBeenCalledWith(pngBuffer, 'product');
   });
 
-  it('allows authenticated anonymous users to upload (upload-image does not require registration)', async () => {
+  it('returns 403 and never calls Gemini/S3 for an anonymous session (ADR 0005 L-1)', async () => {
     session.user = { id: 'anon-1', email: undefined, isAnonymous: true };
     stubMulterFile({ buffer: FAKE_JPEG, mimetype: 'image/jpeg', size: 1024, originalname: 'photo.jpg' });
     mockFileTypeFromBuffer.mockResolvedValue({ mime: 'image/jpeg', ext: 'jpg' });
-    mockUploadImageToS3.mockResolvedValue('processed/uuid.jpg');
 
     const res = await request(app)
       .post('/api/products/upload-image')
       .set('Authorization', 'Bearer anon-token')
       .field('kind', 'product');
 
-    expect(res.status).toBe(200);
-    expect(mockUploadImageToS3).toHaveBeenCalled();
+    expect(res.status).toBe(403);
+    expect(mockCheckImage).not.toHaveBeenCalled();
+    expect(mockUploadImageToS3).not.toHaveBeenCalled();
   });
 
   it('returns 401 when there is no authenticated session', async () => {

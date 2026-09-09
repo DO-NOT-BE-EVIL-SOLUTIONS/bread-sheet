@@ -53,8 +53,14 @@ docs {
   Set the image field to a JPEG / PNG / WebP / GIF / TIFF / AVIF file (8 MB hard cap).
   Set kind to either 'product' or 'label'.
 
+  Requires a registered (non-anonymous) session (ADR 0005 L-1) — anonymous tokens get
+  403 { error: 'Registration required' } before the plausibility check runs, so a guest
+  can never trigger the paid Gemini call. Use "Sign in with password" to get a
+  registered accessToken; "Sign in anonymously" will 403 here.
+
   Failure codes:
     - 400 (missing image / bad kind)
+    - 403 (anonymous session — registration required)
     - 413 (over 8 MB)
     - 415 (unsupported format)
     - 422 { error: 'image_rejected', reason } — plausibility rejection (not a product /
