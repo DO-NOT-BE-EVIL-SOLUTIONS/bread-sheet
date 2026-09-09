@@ -1,6 +1,6 @@
 # Cost Blast Radius and Emergency Stop
 
-* Status: **Accepted — Phase 1 implemented** (2026-09-09, same day; Phase 2 sequenced after it, not started)
+* Status: **Accepted — Phase 1 and Phase 2 implemented** (2026-09-09, same day; Phase 2's app-code piece — `requireOriginSecret`, `trust proxy = 2` — is on a feature branch pending merge to `main` and a `dev` image rebuild, see Phase 2's implementation note)
 * Date: 2026-09-09
 
 ## Context and Problem Statement
@@ -830,6 +830,44 @@ directly. Three things, all mandatory together:
 **Plan budget:** L5 uses Free plan 1 of 3, this uses 2 of 3. Each covers one distribution with one
 apex domain; both sit under `bread-sheet.com`, one apex per plan, which the quota permits.
 
+**Implemented (2026-09-09) as `terraform/phase2.tf` (+ `dns.tf`, `api-gateway.tf`, `keepalive.tf`
+edits; `server/src/middlewares/requireOriginSecret.ts`; `bread-sheet-app/lib/api.ts`;
+`.github/workflows/test-native-e2e.yml`).**
+
+`server.dev.bread-sheet.com` now aliases the new CloudFront distribution; API Gateway's custom
+domain moved to `origin.dev.bread-sheet.com` (own regional cert) and `disable_execute_api_endpoint`
+kills the raw execute-api URL — confirmed live, it now returns API Gateway's own
+`{"message":"Not Found"}` 404 regardless of path. The WAF (`edge-bypass` → `geo-de-only` →
+`rate-limit`, default-allow with header insertion) deploys and evaluates correctly — verified end to
+end: the site works over the new domain, the edge-bypass header matches its rule, and
+`disable_execute_api_endpoint` is confirmed by direct request.
+
+**Two corrections found by applying it:**
+
+* **AWS's ACM tag-value regex doesn't allow parentheses or commas** — the same character-set lesson
+  as the WAF ACL description in `l4.tf`'s "Applied" note, different resource, different regex
+  (`([\p{L}\p{Z}\p{N}_.:/=+\-@]*)`). A descriptive `Name` tag with `(CloudFront, us-east-1)` in it
+  failed `RequestCertificate` outright.
+* **That failure landed mid-cutover and broke the live DNS record.** The apply had already destroyed
+  the old `aws_apigatewayv2_domain_name.server` (renamed to `.origin`) before the tag error stopped
+  it — `aws_route53_record.server` never got to its own update (it depends on the CloudFront
+  distribution, which never got created), so the live alias kept pointing at a custom-domain mapping
+  that had just been deleted. `server.dev.bread-sheet.com` was genuinely down for the several minutes
+  between that first failed apply and the fixed one. **Takeaway for any future rename that spans a
+  `moved` block and a resource the public DNS record depends on: the window between "old resource
+  destroyed" and "new resource created and DNS repointed" is a real outage window if anything in
+  between fails, not just a Terraform bookkeeping detail.**
+
+**One gap deliberately left open by this apply, not a bug found by it.** `requireOriginSecret` and
+the `trust proxy = 2` fix are server code — committed, but not yet in a built container image
+(`build-image.yml` only builds on merge to `main`, and this landed on a feature branch). The
+CloudFront/WAF layer (geo, rate limit, disable_execute_api_endpoint) is fully live and is what bounds
+cost, which was the point of Phase 2; the origin-secret defense-in-depth check — closing the "someone
+finds `origin.dev.bread-sheet.com`" residual — goes live on the next deploy to `dev`, same as every
+other server-code change in this ADR that needed a redeploy to take effect. Confirmed by direct test:
+a request straight to `origin.dev.bread-sheet.com/api/...` currently reaches Express (401 from auth,
+not 403 from the gate) rather than being rejected at the origin-secret check.
+
 ## Implementation
 
 Phase 1 is in progress in parallel with this ADR. Order matters where noted.
@@ -845,7 +883,7 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 | 6 | **L5** — distribution + OAC + WAF ACL + Free plan subscription; remove `PublicReadAllowProcessed`; `ASSET_BASE_URL` → distribution domain (task env var: forced replacement); fix `rds.tf` to use `var.db_max_allocated_storage` while in the file | `terraform/`, `infrastructure.md` | ✅ applied (distribution live, verified end-to-end); ✅ Free plan console step |
 | 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `terraform/l4.tf` | ✅ applied; wiring verified with synthetic under-budget messages (real detach path deliberately never exercised) |
 | 8 | Raise `GEMINI_DAILY_CALL_CAP` on `dev` to 300 once step 2 confirms ~\$0.0036/call | task env | ✅ |
-| P2 | **Phase 2** — API distribution on Free plan 2: WAF geo `DE` + rate rule + header insertion secret, `disable_execute_api_endpoint`, `us-east-1` cert, DNS alias; CI allow path | `terraform/`, `server/app.ts`, `.github/workflows/test-native-e2e.yml` | after Phase 1 |
+| P2 | **Phase 2** — API distribution on Free plan 2: WAF geo `DE` + rate rule + header insertion secret, `disable_execute_api_endpoint`, `us-east-1` cert, DNS alias; CI allow path | `terraform/`, `server/app.ts`, `.github/workflows/test-native-e2e.yml` | ✅ infra applied and verified; ☐ Free plan console step; ☐ `ORIGIN_VERIFY_SECRET` enforcement live on `dev` (pending merge to `main` + image build); ☐ `EDGE_BYPASS_SECRET` copied to GitHub |
 
 Steps 1, 3, 4 and 6 are independent of each other and can land in any order; 5 depends on 2 only
 for its *number*, not its code; 8 depends on 2 and 5.

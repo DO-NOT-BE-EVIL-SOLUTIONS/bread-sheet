@@ -491,6 +491,93 @@ attached — every Google service stops, Vertex/Gemini included — until someon
 will not undo it. That is the point of a hard stop: a human has to consciously reverse it, not have
 Terraform quietly smooth it over.
 
+### Phase 2 — CloudFront over the API (ADR 0005)
+
+`terraform/phase2.tf` fronts the API with a second CloudFront distribution (the account's second Free
+plan slot; L5's images distribution used the first) for two things a plain HTTP API cannot provide:
+per-IP rate limiting and geo-restriction, both enforced at the edge for \$0. Applied and largely
+verified 2026-09-09 — see the caveat at the end of this section on what still needs a deploy.
+
+**Domain layout changed.** `server.dev.bread-sheet.com` now aliases the CloudFront distribution, not
+API Gateway directly. API Gateway's custom domain moved to `origin.dev.bread-sheet.com` — still
+publicly resolvable (CloudFront needs a real hostname to reach as a custom origin, same reasoning as
+OAC on the images bucket), but `disable_execute_api_endpoint = true` (`api-gateway.tf`) kills the raw
+`*.execute-api...` URL, and `requireOriginSecret` (below) is what makes the origin domain's public
+resolvability harmless.
+
+**The WAF (`aws_wafv2_web_acl.api`, `us-east-1`) evaluates three rules in order, then a default
+allow:**
+
+1. `edge-bypass` (priority 0) — matches `X-Edge-Bypass` against a Terraform-generated secret; allows
+   and inserts the origin-secret header. For consumers that legitimately aren't in Germany: CI
+   (GitHub-hosted Maestro runners) and the VPC-link keepalive Lambda, both of which now send it.
+2. `geo-de-only` (priority 1) — blocks anything not geolocated to `DE`. **Country-level only, never
+   `DE-BW`** — German mobile carriers route subscriber traffic through central egress points, so
+   subdivision geolocation fails for real devices on real networks (see the ADR's "The accuracy
+   problem"). Confirmed live: a raw request to `server.dev.bread-sheet.com` from a German vantage
+   succeeds; the geo rule itself wasn't tested from a non-DE vantage (no easy way to do that safely
+   from this environment) — trust the WAF's documented `geo_match_statement` behavior and the config
+   review, not a live cross-border test.
+3. `rate-limit` (priority 2) — blocks at `> 1000` requests / 5 min per IP, the exact threshold
+   `detection.tf`'s API Gateway flood alarm already uses, deliberately, so "too many requests" means
+   one thing across the stack.
+4. Default action: allow, and insert `X-Origin-Verify` with the same secret the edge-bypass rule
+   inserts — this is the header `requireOriginSecret` checks for.
+
+**Origin request policy: `Managed-AllViewerExceptHostHeader`, not `Managed-AllViewer`.** AWS's own
+docs call out API Gateway origins by name here — they expect the `Host` header to carry the origin's
+own domain, and forwarding the viewer's `Host` can break the origin. Excluding it doesn't touch
+`Authorization` or any other header; CloudFront substitutes the origin's domain automatically. Caching
+is fully disabled (`Managed-CachingDisabled`) — this is a dynamic API, not static assets like the
+images distribution.
+
+**`server/src/middlewares/requireOriginSecret.ts`** 403s any `/api/*` request lacking a correct
+`X-Origin-Verify` header. It is a no-op when `ORIGIN_VERIFY_SECRET` is unset — deliberately, unlike
+this codebase's fail-fast convention for other config: local dev and any stage without a CloudFront
+front end have nothing to check against, and that is a legitimate "off" state, not a misconfiguration.
+
+**`app.set('trust proxy', 2)`**, up from `1`. Two proxy hops now sit in front of Express: CloudFront
+(adds the viewer's IP to `X-Forwarded-For`) and API Gateway/the VPC link (the same "1" ADR 0003
+already relied on — the VPC link itself adds no hop). Left at `1` here, every client behind one edge
+location would share an `express-rate-limit` bucket as CloudFront's own edge IP.
+
+**Two things found only by applying this, not by writing it:**
+
+* **ACM certificate tags reject parentheses and commas** — same class of validation-regex surprise as
+  the WAF ACL description in `l4.tf` (`docs/architecture-decision-records/0005-...md` § L4 has the
+  exact regex), different resource. A `Name` tag reading `"... (CloudFront, us-east-1)"` failed
+  `RequestCertificate` outright.
+* **That failure landed mid-cutover and broke the live DNS record for several minutes.** The apply
+  had already destroyed the old `aws_apigatewayv2_domain_name.server` (renamed to `.origin` via a
+  `moved` block) before the cert error stopped it; `aws_route53_record.server`'s own update — which
+  depends on the CloudFront distribution that never got created — never ran, so the live alias kept
+  pointing at a custom-domain mapping that no longer existed. Fixed by correcting the tag and
+  re-applying; the ADR's Phase 2 § implementation note has the full account. **The general lesson:** a
+  `moved` rename that spans a resource the public DNS record depends on has a real outage window
+  between "old thing destroyed" and "new thing created and DNS repointed" if anything in between
+  fails — plan applies touching DNS-critical renames with that in mind.
+
+**What's live vs. what needs a deploy.** The CloudFront/WAF layer — geo-restriction, rate limiting,
+`disable_execute_api_endpoint` — is fully live and is what actually bounds cost; that was the point of
+Phase 2 and it's done. `requireOriginSecret` and the `trust proxy = 2` fix are server code that landed
+on a feature branch, not yet in a container image (`build-image.yml` only builds on merge to `main`).
+Confirmed directly: a request straight to `origin.dev.bread-sheet.com/api/...` currently reaches
+Express (401 from auth) rather than being rejected at the origin-secret gate (403) — that closes on
+the next `dev` deploy, the same as every other server-code change in this ADR.
+
+**One manual step remains.** `EDGE_BYPASS_SECRET` (the CI/keepalive header value) needs copying into
+a GitHub Actions secret — no GitHub provider is configured here, so this isn't automatable from
+Terraform:
+
+```sh
+terraform output -raw phase2_edge_bypass_secret | gh secret set EDGE_BYPASS_SECRET
+```
+
+`.github/workflows/test-native-e2e.yml` already reads it as `EXPO_PUBLIC_EDGE_BYPASS_SECRET` in the
+Maestro job's env — set only there, never in `build-apk.yml`'s release build, so the value never ships
+in a distributed APK (the header-attaching code in `lib/api.ts` ships everywhere; the secret value
+that makes it fire does not).
+
 ### VPC link keepalive
 
 `keepalive.tf` runs a 128 MB Lambda weekly (`rate(7 days)`) against `https://server.dev.bread-sheet.com/`.

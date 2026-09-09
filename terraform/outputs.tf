@@ -33,8 +33,26 @@ output "images_cdn_distribution_id" {
 }
 
 output "api_endpoint" {
-  description = "API Gateway's default execute-api endpoint — bypasses DNS and the custom domain, so it isolates the integration when debugging."
+  description = "API Gateway's default execute-api endpoint. DISABLED since ADR 0005 Phase 2 (disable_execute_api_endpoint = true, api-gateway.tf) — this URL 403s/refuses regardless of what it shows here. Kept only so the value is visible if execute-api ever needs re-enabling for direct-to-gateway debugging."
   value       = aws_apigatewayv2_api.main.api_endpoint
+}
+
+output "phase2_edge_bypass_secret" {
+  description = <<-EOT
+    ADR 0005 Phase 2: the X-Edge-Bypass header value CI must send to skip the
+    DE-only geo restriction (GitHub-hosted runners are not in Germany). Not
+    automatable from here — no GitHub provider is configured — copy it out by
+    hand once:
+
+      terraform output -raw phase2_edge_bypass_secret | gh secret set EDGE_BYPASS_SECRET
+
+    .github/workflows/test-native-e2e.yml reads it as
+    EXPO_PUBLIC_EDGE_BYPASS_SECRET: $${{ secrets.EDGE_BYPASS_SECRET }} (already wired).
+    The VPC-link keepalive Lambda (keepalive.tf) gets the same value directly
+    as a Terraform-managed env var — nothing to copy there.
+  EOT
+  value       = random_password.edge_bypass_secret.result
+  sensitive   = true
 }
 
 output "server_url" {

@@ -3,6 +3,7 @@ import cors from 'cors';
 import { errorHandler } from './middlewares/errorHandler.js';
 import { apiLimiter } from './middlewares/rateLimit.js';
 import { requestLogger } from './middlewares/requestLogger.js';
+import { requireOriginSecret } from './middlewares/requireOriginSecret.js';
 import userRoutes from './routes/userRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import ratingRoutes from './routes/ratingRoutes.js';
@@ -12,11 +13,22 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:8081')
 
 const app = express();
 
-// Behind the Fargate ALB, the client IP arrives in X-Forwarded-For. Trust the
-// single ALB hop so req.ip resolves to the real client and express-rate-limit
-// keys per-client (not per-ALB). Must stay 1 unless another proxy (e.g.
-// CloudFront) is added in front of the ALB.
-app.set('trust proxy', 1);
+// Two proxy hops in front of Express as of ADR 0005 Phase 2: CloudFront
+// (terraform/phase2.tf) adds the viewer's IP to X-Forwarded-For when it
+// forwards to the API Gateway custom origin, and API Gateway/the VPC link
+// contribute the second (the VPC link itself is just ENIs and adds no hop of
+// its own — this "1" is the same one ADR 0003 already relied on when the ALB
+// was removed). `req.ip` must resolve to the real client, not CloudFront's
+// edge IP, or every client behind one edge location shares an
+// express-rate-limit bucket. `2`, not `true`: forged X-Forwarded-For headers
+// still can't be used to dodge limits. Bump only if another proxy is added.
+app.set('trust proxy', 2);
+
+// ADR 0005 Phase 2: 403s any /api/* request that didn't arrive through the
+// CloudFront distribution in front of the API — see the middleware for what
+// that actually buys, given the API Gateway custom domain stays publicly
+// resolvable. Runs before anything else touches the request.
+app.use('/api', requireOriginSecret);
 
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json());

@@ -8,6 +8,16 @@ resource "aws_apigatewayv2_api" "main" {
   # makes API Gateway answer preflights itself and override the backend's
   # headers, which would silently stop ALLOWED_ORIGINS being the source of truth.
 
+  # ADR 0005 Phase 2: kills the raw `*.execute-api.eu-west-1.amazonaws.com` URL
+  # (previously public, previously the `api_endpoint` output). Without this,
+  # CloudFront/WAF (phase2.tf) is decorative — anyone who finds the execute-api
+  # URL reaches the API directly, geo-restriction and rate-limiting included,
+  # same lesson as OAC on the images bucket. Only the custom domain (now
+  # `origin.dev.bread-sheet.com`, dns.tf) answers, and only requests carrying
+  # the header the distribution's WAF inserts get past `requireOriginSecret`
+  # (server/src/app.ts) once they're there.
+  disable_execute_api_endpoint = true
+
   tags = local.tags
 }
 
@@ -109,22 +119,35 @@ resource "aws_apigatewayv2_stage" "default" {
   }
 }
 
-resource "aws_apigatewayv2_api_mapping" "server" {
+moved {
+  from = aws_apigatewayv2_api_mapping.server
+  to   = aws_apigatewayv2_api_mapping.origin
+}
+
+resource "aws_apigatewayv2_api_mapping" "origin" {
   api_id      = aws_apigatewayv2_api.main.id
-  domain_name = aws_apigatewayv2_domain_name.server.id
+  domain_name = aws_apigatewayv2_domain_name.origin.id
   stage       = aws_apigatewayv2_stage.default.id
 }
 
 # ──────────── API Gateway Custom Domain ───────────────────────────────────────
+#
+# ADR 0005 Phase 2: renamed from "server" — this domain is now the internal
+# origin CloudFront calls, not the public name (that's the distribution's own
+# domain in phase2.tf, aliased from `server.dev.bread-sheet.com` in dns.tf).
+moved {
+  from = aws_apigatewayv2_domain_name.server
+  to   = aws_apigatewayv2_domain_name.origin
+}
 
-resource "aws_apigatewayv2_domain_name" "server" {
-  domain_name = "server.dev.bread-sheet.com"
+resource "aws_apigatewayv2_domain_name" "origin" {
+  domain_name = "origin.dev.bread-sheet.com"
 
   domain_name_configuration {
-    certificate_arn = aws_acm_certificate_validation.server.certificate_arn
+    certificate_arn = aws_acm_certificate_validation.origin.certificate_arn
     endpoint_type   = "REGIONAL"
     security_policy = "TLS_1_2"
   }
 
-  tags = merge(local.tags, { Name = "server.dev.bread-sheet.com" })
+  tags = merge(local.tags, { Name = "origin.dev.bread-sheet.com" })
 }

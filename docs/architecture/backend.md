@@ -34,21 +34,22 @@ Applied in order in `app.ts`:
 
 | Order | Middleware | Scope | Purpose |
 |-------|-----------|-------|---------|
-| 1 | `requestLogger` | global | Structured per-request log (`request:start` + `request:finish`) including method, path, status, duration, userId, isAnonymous, IP, and `x-request-id` |
-| 2 | `apiLimiter` | `POST /api/*` | 100 req / 15 min — broad API rate limit |
-| 3 | `authLimiter` | auth endpoints | 10 req / hr — tighter limit on auth routes |
-| 4 | `requireAuth` | protected routes | Validates Supabase Bearer JWT; injects `req.user` |
-| 5 | `requireRegistered` | contribution routes | Checks `is_anonymous !== true`; rejects guests with `403` |
-| 6 | `requireSelf(param)` | user-scoped routes | Compares `req.user.id` to route param; `403` on mismatch |
-| 7 | `requireGroupMember` | group routes | Verifies `GroupMember` record exists; `403` if not |
-| 8 | `requireGroupAdmin` | group admin routes | Same as above + asserts `role === 'ADMIN'` |
-| 9 | `requestDeadline()` | the two Gemini routes | 25 s handler deadline; `503 request_timeout` if nothing has responded by then |
-| 10 | Controllers | — | Handle request, call service, send response |
-| 11 | `errorHandler` | global | Two-channel sanitiser — full detail to logs, generic copy to client; returns early if the response already started |
+| 1 | `requireOriginSecret` | `/api/*` | ADR 0005 Phase 2 — 403s any request lacking the `X-Origin-Verify` header the CloudFront distribution's WAF inserts. No-op when `ORIGIN_VERIFY_SECRET` is unset (local dev, tests, any stage with no CloudFront front end) |
+| 2 | `requestLogger` | global | Structured per-request log (`request:start` + `request:finish`) including method, path, status, duration, userId, isAnonymous, IP, and `x-request-id` |
+| 3 | `apiLimiter` | `POST /api/*` | 100 req / 15 min — broad API rate limit |
+| 4 | `authLimiter` | auth endpoints | 10 req / hr — tighter limit on auth routes |
+| 5 | `requireAuth` | protected routes | Validates Supabase Bearer JWT; injects `req.user` |
+| 6 | `requireRegistered` | contribution routes | Checks `is_anonymous !== true`; rejects guests with `403` |
+| 7 | `requireSelf(param)` | user-scoped routes | Compares `req.user.id` to route param; `403` on mismatch |
+| 8 | `requireGroupMember` | group routes | Verifies `GroupMember` record exists; `403` if not |
+| 9 | `requireGroupAdmin` | group admin routes | Same as above + asserts `role === 'ADMIN'` |
+| 10 | `requestDeadline()` | the two Gemini routes | 25 s handler deadline; `503 request_timeout` if nothing has responded by then |
+| 11 | Controllers | — | Handle request, call service, send response |
+| 12 | `errorHandler` | global | Two-channel sanitiser — full detail to logs, generic copy to client; returns early if the response already started |
 
-Authorization guards (6–8) are composable and applied at the **router layer**, not inside controllers.
+Authorization guards (7–9) are composable and applied at the **router layer**, not inside controllers.
 
-`app.ts` also sets `app.set('trust proxy', 1)` ahead of the stack. In the deployed environment the server sits behind an **API Gateway HTTP API** (ADR 0003 — previously an ALB), which forwards the real client IP in `X-Forwarded-For`. The VPC Link is transparent here: it is only ENIs in the VPC and adds no hop of its own, so the count is still **one** proxy and `1` remains correct. Trusting that single hop makes `req.ip` resolve to the actual client so the IP-keyed limiters (`apiLimiter`, `syncLimiter`) throttle per client rather than per gateway, and avoids `express-rate-limit`'s `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` error. The value is `1` (not `true`) so forged `X-Forwarded-For` headers can't be used to dodge limits; bump it only if another proxy (e.g. CloudFront) is added in front.
+`app.ts` also sets `app.set('trust proxy', 2)` ahead of the stack (raised from `1` by ADR 0005 Phase 2). Two proxy hops sit in front of Express now: the **CloudFront distribution** (`terraform/phase2.tf`) adds the viewer's IP to `X-Forwarded-For` when it forwards to the API Gateway custom origin, and **API Gateway/the VPC Link** contribute the second — the VPC Link itself is just ENIs in the VPC and adds no hop of its own, so this "1" is the same one ADR 0003 already relied on when the ALB was removed, now with CloudFront's own hop added in front of it. Trusting both hops makes `req.ip` resolve to the actual client rather than CloudFront's edge IP, so the IP-keyed limiters (`apiLimiter`, `syncLimiter`) throttle per client rather than per edge location, and avoids `express-rate-limit`'s `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` error. The value is `2` (not `true`) so forged `X-Forwarded-For` headers can't be used to dodge limits; bump it only if another proxy is added in front of CloudFront.
 
 ---
 

@@ -119,6 +119,11 @@ resource "aws_ecs_task_definition" "server" {
     secrets = [
       { name = "SUPABASE_URL", valueFrom = aws_ssm_parameter.supabase_url.arn },
       { name = "SUPABASE_PUBLISHABLE_DEFAULT_KEY", valueFrom = aws_ssm_parameter.supabase_key.arn },
+      # ADR 0005 Phase 2 (phase2.tf). requireOriginSecret (app.ts) checks this
+      # against X-Origin-Verify — the header the CloudFront WAF inserts on
+      # every request it allows. `secrets`, not `environment`: this one's a
+      # credential, not config, unlike GEMINI_DAILY_CALL_CAP above.
+      { name = "ORIGIN_VERIFY_SECRET", valueFrom = aws_ssm_parameter.origin_verify_secret.arn },
     ]
 
     logConfiguration = {
