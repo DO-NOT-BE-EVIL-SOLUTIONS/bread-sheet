@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockGenerateContent = vi.hoisted(() => vi.fn());
+const mockReserveGeminiCall = vi.hoisted(() => vi.fn());
+
+class FakeGeminiDailyQuotaExhaustedError extends Error {
+  readonly status = 503;
+  readonly code = 'daily_quota_exhausted';
+  constructor(readonly cap: number) {
+    super(`Gemini daily call cap (${cap}) reached`);
+  }
+}
+
+vi.mock('./geminiQuota.js', () => ({
+  reserveGeminiCall: mockReserveGeminiCall,
+  GeminiDailyQuotaExhaustedError: FakeGeminiDailyQuotaExhaustedError,
+}));
 
 vi.mock('@google/genai', () => {
   class GoogleGenAI {
@@ -26,6 +40,8 @@ const OK_RESPONSE = {
 describe('imagePlausibilityService', () => {
   beforeEach(() => {
     mockGenerateContent.mockReset();
+    mockReserveGeminiCall.mockReset();
+    mockReserveGeminiCall.mockResolvedValue(undefined);
     vi.resetModules();
     delete process.env.PLAUSIBILITY_MODE;
     delete process.env.GEMINI_API_KEY;
@@ -71,6 +87,12 @@ describe('imagePlausibilityService', () => {
       expect(result.verdict).toBe('ok');
       expect(result.name).toBeNull();
       expect(result.brand).toBeNull();
+    });
+
+    it('never consults the daily quota', async () => {
+      const { checkImage } = await import('./imagePlausibilityService.js');
+      await checkImage(Buffer.from('x'), 'image/jpeg', 'product');
+      expect(mockReserveGeminiCall).not.toHaveBeenCalled();
     });
   });
 
@@ -147,6 +169,29 @@ describe('imagePlausibilityService', () => {
 
       await expect(checkImage(Buffer.from('x'), 'image/jpeg', 'product')).rejects.toThrow(
         /GEMINI_API_KEY/,
+      );
+      expect(mockGenerateContent).not.toHaveBeenCalled();
+    });
+
+    // ADR 0005 L2: reserve before calling, never count after.
+    it('reserves against the daily cap before calling Gemini', async () => {
+      mockGenerateContent.mockResolvedValue({ text: JSON.stringify(OK_RESPONSE) });
+      const { checkImage } = await import('./imagePlausibilityService.js');
+
+      await checkImage(Buffer.from('x'), 'image/jpeg', 'product');
+
+      expect(mockReserveGeminiCall).toHaveBeenCalledWith('plausibility');
+      const reserveOrder = mockReserveGeminiCall.mock.invocationCallOrder[0]!;
+      const callOrder = mockGenerateContent.mock.invocationCallOrder[0]!;
+      expect(reserveOrder).toBeLessThan(callOrder);
+    });
+
+    it('never calls Gemini once the daily cap is exhausted', async () => {
+      mockReserveGeminiCall.mockRejectedValue(new FakeGeminiDailyQuotaExhaustedError(300));
+      const { checkImage } = await import('./imagePlausibilityService.js');
+
+      await expect(checkImage(Buffer.from('x'), 'image/jpeg', 'product')).rejects.toThrow(
+        FakeGeminiDailyQuotaExhaustedError,
       );
       expect(mockGenerateContent).not.toHaveBeenCalled();
     });

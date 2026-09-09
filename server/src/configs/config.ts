@@ -97,6 +97,10 @@ interface Config {
   s3BucketName: string;
   assetBaseUrl: string;
   appDeepLinkScheme: string;
+  // Daily cap on Gemini calls (ADR 0005 L2). Only required when a Gemini call
+  // site can actually run (see `geminiNeeded` below); `null` otherwise so mock
+  // stages never need the var. `services/geminiQuota.ts` enforces it.
+  geminiDailyCallCap: number | null;
 }
 
 const visionMode = readVisionMode();
@@ -125,6 +129,26 @@ if (geminiNeeded) {
   }
 }
 
+// ADR 0005 L2: no default anywhere, including for the cap value itself — a
+// misconfigured var must fail startup, not silently admit unlimited calls.
+function readGeminiDailyCallCap(required: boolean): number | null {
+  const v = process.env.GEMINI_DAILY_CALL_CAP;
+  if (!required && v === undefined) return null;
+  if (!v) {
+    throw new Error(
+      'Missing required environment variable: GEMINI_DAILY_CALL_CAP ' +
+        '(required when VISION_MODE=llm or PLAUSIBILITY_MODE=gemini; a positive integer)',
+    );
+  }
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`Invalid GEMINI_DAILY_CALL_CAP "${v}". Must be a positive integer.`);
+  }
+  return n;
+}
+
+const geminiDailyCallCap = readGeminiDailyCallCap(geminiNeeded);
+
 const appDeepLinkScheme = process.env.APP_DEEP_LINK_SCHEME;
 if (!appDeepLinkScheme) {
   throw new Error(
@@ -142,6 +166,7 @@ const config: Config = {
   s3BucketName: readS3BucketName(),
   assetBaseUrl: readAssetBaseUrl(),
   appDeepLinkScheme,
+  geminiDailyCallCap,
 };
 
 export default config;

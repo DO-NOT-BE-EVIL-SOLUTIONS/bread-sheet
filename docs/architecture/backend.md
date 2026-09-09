@@ -317,6 +317,21 @@ The controller (`labelExtractionController.ts`) branches on `getVisionMode()`: `
 
 Two consequences worth knowing. `requestDeadline` cannot *cancel* the handler (Express has no mechanism for it), so the handler may finish afterwards and try to write to a response that has already been sent — which is why `errorHandler` returns early on `res.headersSent`. And the 5xx messages never reach the user: `errorHandler` collapses every 5xx to generic copy and the app's `formatApiError` does the same, so `code` is the only part of a timeout the client can branch on.
 
+**Daily call cap (ADR 0005 § L2).** Both Gemini call sites reserve a slot against `GEMINI_DAILY_CALL_CAP` — a per-stage env var with no default, `services/geminiQuota.ts` (`reserveGeminiCall(operation)`) — **before** calling Gemini, not after: `imagePlausibilityService.checkGemini()` and `labelExtractionLlmService.extractLabelWithLlm()` both call it as their first line, so `mock`/non-`llm` modes never touch it (the reservation sits inside the Gemini-only code path, not the controller). The reservation is one atomic statement against a single-row-per-day table:
+
+```sql
+INSERT INTO "GeminiDailyUsage" (day, calls) VALUES (CURRENT_DATE, 1)
+ON CONFLICT (day) DO UPDATE SET calls = "GeminiDailyUsage".calls + 1
+  WHERE "GeminiDailyUsage".calls < $cap
+RETURNING calls;
+```
+
+No returned row means the cap is reached for the day, and `reserveGeminiCall` throws `GeminiDailyQuotaExhaustedError` (`503 { code: 'daily_quota_exhausted' }`) without ever calling Gemini. Three rules, matching ADR 0005:
+
+- **Reserve before calling, never count after** — the `WHERE calls < cap` guard on the conflict branch makes the increment-and-check one atomic statement, so concurrent requests can't both read "under cap" and both increment past it.
+- **Timeouts and failures still count** — the reservation is made before `withGeminiDeadline` runs and is never rolled back, because Google bills input tokens it has already processed even if the call then times out or errors.
+- **Fail closed** — if the query itself throws (DB unreachable, etc.), `reserveGeminiCall` logs the failure and raises the same `GeminiDailyQuotaExhaustedError` rather than letting the call through.
+
 **Parser design (`labelExtractionService.ts`):**
 - All patterns use the `m` flag so `^` anchors to the start of each line, preventing sub-entry rows ("of which saturates", "davon Zucker") from matching the parent-nutrient patterns.
 - Decimal separators: both `.` (English) and `,` (German/European) are normalised to `.` before parsing.
@@ -340,7 +355,7 @@ A Postman collection covering every endpoint lives at `docs/postman/breadsheet.p
 
 **No inline defaults for runtime-behaviour variables.** All environment variables that control runtime behaviour must be read and validated in `server/src/configs/config.ts` at startup. If a required variable is absent or has an unexpected value the process must throw a descriptive error — never fall back silently to a local-dev default in application code.
 
-**Mode-style variables** (e.g. `VISION_MODE` = `'mock' | 'live' | 'llm'`, `PLAUSIBILITY_MODE` = `'mock' | 'gemini'`) must be validated against an explicit allowlist. Any value outside the allowlist — including an absent value — is a startup error. Conditional secrets that a mode requires (e.g. `GEMINI_API_KEY` when `VISION_MODE=llm` or `PLAUSIBILITY_MODE=gemini`) are also validated at startup in `config.ts`.
+**Mode-style variables** (e.g. `VISION_MODE` = `'mock' | 'live' | 'llm'`, `PLAUSIBILITY_MODE` = `'mock' | 'gemini'`) must be validated against an explicit allowlist. Any value outside the allowlist — including an absent value — is a startup error. Conditional secrets that a mode requires (e.g. `GEMINI_API_KEY` when `VISION_MODE=llm` or `PLAUSIBILITY_MODE=gemini`) are also validated at startup in `config.ts`, and so is `GEMINI_DAILY_CALL_CAP` (ADR 0005 § L2) — a positive integer, required under the same condition, `null` in `config.ts` (and never consulted) otherwise.
 
 **Local-dev values** belong in `.env` (git-ignored), not hardcoded in source.
 

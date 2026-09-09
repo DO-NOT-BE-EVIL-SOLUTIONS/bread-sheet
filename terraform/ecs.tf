@@ -90,6 +90,11 @@ resource "aws_ecs_task_definition" "server" {
       { name = "ASSET_BASE_URL", value = "https://${var.s3_bucket_name}.s3.eu-west-1.amazonaws.com" },
       { name = "VISION_MODE", value = "llm" },
       { name = "PLAUSIBILITY_MODE", value = "gemini" },
+      # ADR 0005 L2. config.ts requires this whenever VISION_MODE=llm or
+      # PLAUSIBILITY_MODE=gemini (both true here) — omitting it crash-loops the
+      # task at boot, it does not fall back to unlimited. Interim value until
+      # ADR 0005 step 8 raises it to 300 (thinking-disabled cost confirmed).
+      { name = "GEMINI_DAILY_CALL_CAP", value = "100" },
       { name = "APP_DEEP_LINK_SCHEME", value = "breadsheet" },
       { name = "GOOGLE_GENAI_USE_VERTEXAI", value = "true" },
       { name = "GOOGLE_CLOUD_PROJECT", value = var.gcp_project },

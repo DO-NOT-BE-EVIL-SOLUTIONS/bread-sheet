@@ -179,6 +179,16 @@ model ProductVerification {
   @@unique([productId, userId]) // one vote per user per product; second vote overwrites via upsert
 }
 
+// Daily reservation counter for Gemini calls (ADR 0005 L2). One row per
+// calendar day; `reserveGeminiCall` (services/geminiQuota.ts) atomically
+// increments it BEFORE the call is made and refuses once `calls` reaches
+// `GEMINI_DAILY_CALL_CAP`, via a conditional `ON CONFLICT DO UPDATE ... WHERE`
+// rather than an application-level read-then-write (which would race).
+model GeminiDailyUsage {
+  day   DateTime @id @db.Date
+  calls Int      @default(0)
+}
+
 model Group {
   id        String   @id @default(uuid())
   name      String
