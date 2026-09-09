@@ -99,6 +99,23 @@ anywhere in `server/src`** — so a four-field classification is paying for reas
 Setting a zero or minimal thinking budget is the single cheapest cost fix available, and it is
 **implementation step 2** below because it decides what L2's cap can be.
 
+**Confirmed 2026-09-09 (step 2).** Both call sites now set `thinkingConfig: { thinkingBudget: 0 }`
+and log per-call token counts + cost via `services/geminiUsage.ts`. `npm run measure:gemini -- --n 10`
+against a local server (`GEMINI_API_KEY`, real label photo, `thoughtsTokenCount: 0` on every call)
+measured:
+
+| Call site | n | avg input tokens | avg output tokens | avg \$/call |
+|---|---:|---:|---:|---:|
+| `imagePlausibilityService` (`plausibility`) | 10 | 1,410 | 45.5 | \$0.002524 |
+| `labelExtractionLlmService` (`label-extraction`) | 10 | 1,832 | 207.1 | \$0.004612 |
+| blended (equal mix) | 20 | — | — | **\$0.003568** |
+
+This lands almost exactly on the \$0.0036 "no thinking" estimate above — the estimate was right, thinking
+was the whole gap. It confirms L2's 300/day target: 300 × \$0.003568 × 30 ≈ **\$32.11/mo**, matching the
+\$32.40/mo the sizing rule below was built against. `GEMINI_DAILY_CALL_CAP` can go to 300 once L2
+(step 5) exists — this step only unblocks that number, it doesn't raise the cap itself (no cap
+exists yet on `dev`).
+
 **The bulkhead I wanted to claim is weaker than it looks.** `ecs.tf` runs one 256-CPU / 512 MB task
 with no autoscaling, which does bound *CPU-bound* work. But a plausibility call is `await`-bound: at
 ~13 s measured latency (ADR 0003 step 0b) and 1 rps arrival, ~13 concurrent 4 MB buffers is ~52 MB
@@ -695,7 +712,7 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 |---|---|---|---|
 | 0 | Confirm `aws_sns_topic.billing_alerts` has a confirmed email subscriber (`aws sns list-subscriptions-by-topic`) | console/CLI | ✅ (confirmed `breadsheet@pm.me`) |
 | 1 | **L-1** — `requireRegistered` on `POST /api/products/upload-image`; update the route test and `backend.md` § endpoints | `server/` | ✅ |
-| 2 | **Measure and set `thinkingConfig`** on both Gemini call sites; re-run `npm run measure:gemini` locally (ADR 0003 showed local predicts `dev`) and record \$/call. Decides L2's final cap | `server/` | ☐ |
+| 2 | **Measure and set `thinkingConfig`** on both Gemini call sites; re-run `npm run measure:gemini` locally (ADR 0003 showed local predicts `dev`) and record \$/call. Decides L2's final cap | `server/` | ✅ (\$0.003568/call blended, confirms 300/day ≈ \$32/mo) |
 | 3 | **L1** — `default_route_settings` 5 rps / burst 25; explicit upload route at 1 rps / burst 5, with the "exists to be throttled" comment | `terraform/api-gateway.tf` | ✅ |
 | 4 | **D** — Cost Anomaly monitor + subscription, API Gateway `Count` alarm, log metric filter + `GeminiCalls` alarm, all → `billing_alerts`; GCP budget with email thresholds | `terraform/`, GCP console | ✅ |
 | 5 | **L2** — `GeminiDailyUsage` Prisma model + migration, reservation function beside `geminiDeadline.ts`, `GEMINI_DAILY_CALL_CAP` in `config.ts` (fail-fast, validated integer), `503 daily_quota_exhausted`, tests incl. concurrency and fail-closed; `CLAUDE.md` env-var block, `backend.md`, Bruno docs for the new 503 | `server/` | ☐ |

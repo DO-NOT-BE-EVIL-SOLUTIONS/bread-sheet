@@ -2,6 +2,7 @@ import { Type } from '@google/genai';
 import logger from '../logger.js';
 import { getGeminiClient } from '../geminiClient.js';
 import { withGeminiDeadline } from './geminiDeadline.js';
+import { logGeminiUsage } from './geminiUsage.js';
 import type { ExtractedLabel } from './labelExtractionService.js';
 
 const MODEL = 'gemini-3.5-flash';
@@ -72,11 +73,16 @@ export async function extractLabelWithLlm(
       config: {
         responseMimeType: 'application/json',
         responseSchema,
+        // ADR 0005 L2 sizing: structured field extraction doesn't need reasoning,
+        // and Gemini 3.x bills thinking tokens as output at the full rate — this
+        // is the ~3.5x cost difference the daily cap is set against.
+        thinkingConfig: { thinkingBudget: 0 },
         abortSignal,
       },
     }),
   );
 
+  logGeminiUsage('label-extraction', response.usageMetadata);
   const raw = response.text ?? '';
   logger.debug('vision:llm raw response', { length: raw.length, text: raw });
   return JSON.parse(raw) as ExtractedLabel;

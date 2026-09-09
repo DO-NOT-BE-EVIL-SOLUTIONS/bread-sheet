@@ -74,6 +74,8 @@ describe('extractLabelWithLlm', () => {
     expect(call.config.responseSchema.required).toContain('confidence');
     expect(call.config.responseSchema.required).toContain('sugars');
     expect(call.config.responseSchema.required).toContain('saturatedFat');
+    // ADR 0005 L2: thinking disabled — reasoning tokens bill as output at the full rate.
+    expect(call.config.thinkingConfig).toEqual({ thinkingBudget: 0 });
     expect(call.contents[0].parts[0].inlineData).toEqual({
       mimeType: 'image/jpeg',
       data: buffer.toString('base64'),
