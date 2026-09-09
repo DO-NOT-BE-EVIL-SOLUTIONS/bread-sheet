@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockGenerateContent = vi.hoisted(() => vi.fn());
+const mockReserveGeminiCall = vi.hoisted(() => vi.fn());
+
+class FakeGeminiDailyQuotaExhaustedError extends Error {
+  readonly status = 503;
+  readonly code = 'daily_quota_exhausted';
+  constructor(readonly cap: number) {
+    super(`Gemini daily call cap (${cap}) reached`);
+  }
+}
+
+vi.mock('./geminiQuota.js', () => ({
+  reserveGeminiCall: mockReserveGeminiCall,
+  GeminiDailyQuotaExhaustedError: FakeGeminiDailyQuotaExhaustedError,
+}));
 
 vi.mock('@google/genai', () => {
   class GoogleGenAI {
@@ -38,6 +52,8 @@ const FAKE_RESPONSE = {
 describe('extractLabelWithLlm', () => {
   beforeEach(() => {
     mockGenerateContent.mockReset();
+    mockReserveGeminiCall.mockReset();
+    mockReserveGeminiCall.mockResolvedValue(undefined);
     vi.resetModules();
     process.env.GEMINI_API_KEY = 'test-key';
   });
@@ -106,5 +122,28 @@ describe('extractLabelWithLlm', () => {
     const { extractLabelWithLlm } = await import('./labelExtractionLlmService.js');
 
     await expect(extractLabelWithLlm(Buffer.from('x'))).rejects.toThrow();
+  });
+
+  // ADR 0005 L2: reserve before calling, never count after.
+  it('reserves against the daily cap before calling Gemini', async () => {
+    mockGenerateContent.mockResolvedValue({ text: JSON.stringify(FAKE_RESPONSE) });
+    const { extractLabelWithLlm } = await import('./labelExtractionLlmService.js');
+
+    await extractLabelWithLlm(Buffer.from('x'), 'image/jpeg');
+
+    expect(mockReserveGeminiCall).toHaveBeenCalledWith('label-extraction');
+    const reserveOrder = mockReserveGeminiCall.mock.invocationCallOrder[0]!;
+    const callOrder = mockGenerateContent.mock.invocationCallOrder[0]!;
+    expect(reserveOrder).toBeLessThan(callOrder);
+  });
+
+  it('never calls Gemini once the daily cap is exhausted', async () => {
+    mockReserveGeminiCall.mockRejectedValue(new FakeGeminiDailyQuotaExhaustedError(300));
+    const { extractLabelWithLlm } = await import('./labelExtractionLlmService.js');
+
+    await expect(extractLabelWithLlm(Buffer.from('x'), 'image/jpeg')).rejects.toThrow(
+      FakeGeminiDailyQuotaExhaustedError,
+    );
+    expect(mockGenerateContent).not.toHaveBeenCalled();
   });
 });

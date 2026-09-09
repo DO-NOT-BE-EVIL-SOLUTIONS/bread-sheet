@@ -9,3 +9,4 @@ process.env.S3_MODE = 'localstack';
 process.env.S3_BUCKET_NAME = 'test-bucket';
 process.env.ASSET_BASE_URL = 'http://assets.test/test-bucket';
 process.env.APP_DEEP_LINK_SCHEME = 'exp+breadsheet';
+process.env.GEMINI_DAILY_CALL_CAP = '300';

@@ -3,6 +3,7 @@ import logger from '../logger.js';
 import { getGeminiClient } from '../geminiClient.js';
 import { withGeminiDeadline } from './geminiDeadline.js';
 import { logGeminiUsage } from './geminiUsage.js';
+import { reserveGeminiCall } from './geminiQuota.js';
 import type { ExtractedLabel } from './labelExtractionService.js';
 
 const MODEL = 'gemini-3.5-flash';
@@ -57,6 +58,8 @@ export async function extractLabelWithLlm(
   buffer: Buffer,
   mimeType = 'image/jpeg',
 ): Promise<ExtractedLabel> {
+  await reserveGeminiCall('label-extraction');
+
   const client = getGeminiClient();
   const response = await withGeminiDeadline('label-extraction', (abortSignal) =>
     client.models.generateContent({

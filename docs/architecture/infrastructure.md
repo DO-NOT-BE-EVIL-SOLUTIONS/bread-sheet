@@ -81,6 +81,7 @@ by the shared `getGeminiClient()` factory — the app code is identical):
   4. Set in `server/.env` (leave `GEMINI_API_KEY` unset):
      ```env
      PLAUSIBILITY_MODE=gemini
+     GEMINI_DAILY_CALL_CAP=100          # required whenever PLAUSIBILITY_MODE=gemini or VISION_MODE=llm
      GOOGLE_GENAI_USE_VERTEXAI=true
      GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
      GOOGLE_CLOUD_LOCATION=global
@@ -90,6 +91,7 @@ by the shared `getGeminiClient()` factory — the app code is identical):
   required), then in `server/.env`:
   ```env
   PLAUSIBILITY_MODE=gemini
+  GEMINI_DAILY_CALL_CAP=100          # required whenever PLAUSIBILITY_MODE=gemini or VISION_MODE=llm
   GEMINI_API_KEY=your-key            # leave GOOGLE_GENAI_USE_VERTEXAI unset
   ```
 

@@ -465,6 +465,15 @@ per-user limit: anonymous accounts are free to mint, so per-user caps bound noth
 Both Gemini call sites (`imagePlausibilityService.ts`, `labelExtractionService.ts`) reserve through
 the same function, next to `services/geminiDeadline.ts`.
 
+**Implemented (2026-09-09) as `services/geminiQuota.ts` (`reserveGeminiCall`, `GeminiDailyQuotaExhaustedError`).**
+The call site is `labelExtractionLlmService.ts` specifically (the Gemini path of label extraction;
+the text and OCR paths never call Gemini and never reserve). `dev` ships with
+`GEMINI_DAILY_CALL_CAP=100` per the interim value above. Verified directly against the local
+Postgres: two reservations at `cap=2` return `calls` 1 and 2, a third returns zero rows and inserts
+nothing extra — the `WHERE calls < cap` guard on the `ON CONFLICT DO UPDATE` branch is one atomic
+statement, not a read-then-write, so the race the sizing rule worries about doesn't exist at the SQL
+level.
+
 ### D — detection
 
 * **`aws_ce_anomaly_monitor` (account-level, `AWS_SERVICES`) + `aws_ce_anomaly_subscription`**
@@ -715,7 +724,7 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 | 2 | **Measure and set `thinkingConfig`** on both Gemini call sites; re-run `npm run measure:gemini` locally (ADR 0003 showed local predicts `dev`) and record \$/call. Decides L2's final cap | `server/` | ✅ (\$0.003568/call blended, confirms 300/day ≈ \$32/mo) |
 | 3 | **L1** — `default_route_settings` 5 rps / burst 25; explicit upload route at 1 rps / burst 5, with the "exists to be throttled" comment | `terraform/api-gateway.tf` | ✅ |
 | 4 | **D** — Cost Anomaly monitor + subscription, API Gateway `Count` alarm, log metric filter + `GeminiCalls` alarm, all → `billing_alerts`; GCP budget with email thresholds | `terraform/`, GCP console | ✅ |
-| 5 | **L2** — `GeminiDailyUsage` Prisma model + migration, reservation function beside `geminiDeadline.ts`, `GEMINI_DAILY_CALL_CAP` in `config.ts` (fail-fast, validated integer), `503 daily_quota_exhausted`, tests incl. concurrency and fail-closed; `CLAUDE.md` env-var block, `backend.md`, Bruno docs for the new 503 | `server/` | ☐ |
+| 5 | **L2** — `GeminiDailyUsage` Prisma model + migration, reservation function beside `geminiDeadline.ts`, `GEMINI_DAILY_CALL_CAP` in `config.ts` (fail-fast, validated integer), `503 daily_quota_exhausted`, tests incl. concurrency and fail-closed; `CLAUDE.md` env-var block, `backend.md`, Bruno docs for the new 503 | `server/` | ✅ |
 | 6 | **L5** — distribution + OAC + WAF ACL + Free plan subscription; remove `PublicReadAllowProcessed`; `ASSET_BASE_URL` → distribution domain (task env var: forced replacement); fix `rds.tf` to use `var.db_max_allocated_storage` while in the file | `terraform/`, `infrastructure.md` | ☐ |
 | 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `terraform/budget.tf` | ☐ |
 | 8 | Raise `GEMINI_DAILY_CALL_CAP` on `dev` to 300 once step 2 confirms ~\$0.0036/call | task env | ☐ |
