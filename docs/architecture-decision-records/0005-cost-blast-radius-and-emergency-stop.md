@@ -62,23 +62,41 @@ At the current account-default 10,000 rps, the theoretical ceiling is 864M reque
 | API Gateway requests | **AWS** $1.00/M | nothing (10,000 rps default) | ~$864/day |
 | S3 `GetObject` egress | **AWS** $0.09/GB | nothing — `s3.tf:29` grants `Principal: "*"` read on `processed/*`, CORS `*` | ~$92/TB, bypasses the API entirely |
 | CloudWatch Logs ingestion | **AWS** ~$0.57/GB | request volume (`retention_in_days = 1` caps storage, not ingest) | scales with the flood |
-| Gemini / Vertex AI | **Google** per call | task throughput only | **invisible to `budget.tf`** |
-| Anonymous user rows / MAU | **Supabase** | nothing — `signInAnonymously()` is open to the world | tier escalation |
+| Gemini / Vertex AI | **Google** ~$0.0036–0.013/call | nothing — see below | **$311–1,089/day, invisible to `budget.tf`** |
 | Fargate task | AWS | `desired_count = 1`, no autoscaling | flat $9.01/mo |
-| RDS + gp3 storage | AWS | instance class; storage autoscale ceiling 50 GiB | flat, +$3.80 at ceiling |
+| RDS + gp3 storage | AWS | `rds.tf:21` hardcodes `max_allocated_storage = 100` (the `db_max_allocated_storage` variable, default 50, is **unused**) | flat, +$9.10 at ceiling |
+| Anonymous Supabase sessions | — | Supabase rate-limits anonymous sign-in per IP/hour; free tier pauses, Pro ships a spend cap **on** | not a cost event — but it is the *abuse* surface that makes the Gemini row reachable |
 
-Two things fall out of this table.
+Three things fall out of this table.
 
-**The one real guardrail we already have is accidental.** `ecs.tf` runs a single 256-CPU /
-512 MB task with no autoscaling. Nothing downstream of the gateway can be consumed faster than one
-0.25 vCPU task can push it. That is a genuine bulkhead on Gemini spend, and it is load-bearing —
-adding ECS autoscaling would remove it.
+**The two fears are independent, and that is the most important sentence here.** ADR 0003 traded a
+flat $18.40 ALB for a $1.00/M gateway line — that added exactly *one* per-request cost, and it is
+bounded by ten lines of HCL. The frightening tail is unbounded Gemini spend from a public upload
+endpoint, which **existed before ADR 0003 and which the ALB never protected**. Keeping the ADR 0003
+saving and closing the tail are not alternatives; there is nothing to choose between.
 
-**The most expensive plausible incident is on the wrong card.** `POST /api/products/upload-image`
-(`server/src/routes/productRoutes.ts:57`) is guarded by `requireAuth` only — anonymous Supabase
-sessions reach it — and every call runs the `PLAUSIBILITY_MODE=gemini` check before the S3 write.
-`budget.tf` cannot see one cent of that spend, because it is a Google Cloud charge against project
-`breadsheet-496522`.
+**The expensive incident is on the wrong card, and it is bigger than the AWS one.**
+`POST /api/products/upload-image` (`server/src/routes/productRoutes.ts:57`) is `requireAuth` only —
+anonymous sessions reach it — and every call runs the `PLAUSIBILITY_MODE=gemini` check before the
+S3 write. `imagePlausibilityService.ts:7` pins `gemini-3.5-flash`, billed on Vertex at **$1.50/M
+input, $9.00/M output**. A 1600 px image tiles to roughly 1,550 image tokens plus ~350 of prompt:
+
+| | Per call | Per day at 1 rps |
+|---|---:|---:|
+| No thinking (~80 output tokens) | ~$0.0036 | **~$311** |
+| Default thinking (~1,000 thinking tokens) | ~$0.0126 | **~$1,089** |
+
+Gemini 3.x bills internal reasoning as output at the full rate, and **there is no `thinkingConfig`
+anywhere in `server/src`** — so a four-field classification is paying for reasoning it does not need.
+Setting a zero or minimal thinking budget is the single cheapest cost fix available and should be
+measured before L2 is sized.
+
+**The bulkhead I wanted to claim is weaker than it looks.** `ecs.tf` runs one 256-CPU / 512 MB task
+with no autoscaling, which does bound *CPU-bound* work. But a plausibility call is `await`-bound: at
+~13 s measured latency (ADR 0003 step 0b) and 1 rps arrival, ~13 concurrent 4 MB buffers is ~52 MB
+against a ~124 MB baseline in 512 MB. The task will sustain 1 rps comfortably. Concurrency here is
+memory-bound, not CPU-bound, and memory is not the constraint. **Do not count the single task as a
+Gemini guardrail.**
 
 **And `express-rate-limit` saves nothing at the gateway.** `apiLimiter` (100 req/15 min per IP)
 runs *after* API Gateway has received, routed and billed the request. It protects the task; it does
@@ -153,34 +171,54 @@ is the decision.**
 
 | Layer | Mechanism | Latency | Caps |
 |---|---|---|---|
-| **L0** Quota | Vertex AI per-project requests-per-minute override | synchronous | Google spend, hard |
+| **L-1** Gate | `requireRegistered` on `POST /api/products/upload-image` | synchronous | who can spend Google money at all |
+| **L0** Quota | Vertex AI per-project requests-per-minute override | synchronous | Google spend per *minute* — not per day |
 | **L1** Throttle | `default_route_settings` on the stage; tighter `route_settings` on the upload route | synchronous | everything behind the gateway |
-| **L2** App cap | daily Gemini call counter → 503 | synchronous | Google spend, from inside |
+| **L2** App cap | daily Gemini call counter → 503 | synchronous | Google spend as a **chosen daily number** |
 | **L3** Panic | CloudWatch `Count` alarm → SNS → Lambda | minutes | AWS gateway + all downstream |
 | **L4** Backstop | GCP budget → disable billing; AWS Budget Action → stop RDS | hours | last resort, both cards |
 
 ### Proportionality — what is actually worth building
 
-The layers are not equally worth their effort, and the table above flatters the expensive ones.
-Ranked by risk removed per hour spent:
+The layers are not equally worth their effort. Ranked by risk removed per hour spent — **and ranked
+against both cards, not just the AWS one**:
 
 | Layer | Effort | Residual after it | Verdict |
 |---|---|---|---|
-| **L1** stage throttle | ~10 lines of HCL, one apply | $864/day → **$0.86/day** | **Do it.** Three orders of magnitude for twenty minutes. |
-| **L0** Vertex RPM quota | one console setting | Google bill hard-capped | **Do it.** Five minutes. |
-| **L4** GCP billing detach | ~1 hour | the only true hard stop anywhere | Do it when convenient. |
-| **L2** app-level daily cap | few hours + tests | mostly redundant once L0 exists | Optional. |
-| **L3** panic Lambda | half a day, destructive, false-positive risk | guards a residual L1 already caps at ~$26/mo | **Probably not worth it.** |
-| **Geo / CloudFront** | a day+, second ACM cert in `us-east-1`, shared-secret header, DNS change | costs *more* per request above free tier | **Not for cost.** Only if surface reduction is wanted for its own sake. |
+| **L-1** registered-only upload | **one line** | removes anonymous access to the most expensive path | **Do it first.** Free. |
+| **L1** stage throttle @ 5 rps | ~10 lines of HCL, one apply | AWS: $864/day → **~$0.43/day** gateway + ~$5/mo logs | **Do it.** Twenty minutes. |
+| **L2** daily Gemini counter | few hours + tests | Google: **the only layer that yields a chosen daily number** | **Do it.** Ranks with L1, not below it. |
+| **L4** GCP billing detach | ~1 hour | the only true hard stop anywhere; the belt behind L2's braces | Do it. |
+| **L0** Vertex RPM quota | one console setting | per-*minute* only — 5 RPM is still 7,200 calls/day (~$26–91) | Five-minute extra, not a day cap. |
+| **L3** panic Lambda | half a day, destructive, false-positive risk | guards an AWS residual L1 already bounds | **Documented, not planned.** |
+| **Geo / CloudFront** | a day+, second ACM cert in `us-east-1`, shared-secret header, DNS change | costs *more* per request above free tier | **Documented, not planned.** Not a cost control. |
 
-**L0 + L1 together are about thirty minutes of work and remove essentially all of the tail risk.**
-Everything below them in that table is defending a bill that L1 has already bounded at under a
-dollar a day. This ADR documents the full ladder so the reasoning survives, but scoping the
-implementation to the top two rows is the proportionate response — and the honest reading of the
-threat model, which is a hobby project's dev subdomain with no traffic and no payoff for an
-attacker. The likeliest source of a surprise bill is not a botnet; it is **our own code** — a retry
-loop in the rating outbox, an E2E suite left pointed at `dev`, an agent-team run in a loop. L1
-catches that case too, and it is the case that will actually happen.
+**The earlier draft of this table ranked by the AWS bill and got the order wrong.** It called L2
+"optional, mostly redundant once L0 exists". That is false: Vertex quotas are per-minute, so no
+setting of L0 produces a daily ceiling, and L1's per-route throttle of 1 rps on the upload path
+still permits 86,400 plausibility calls a day — the ~$311–1,089/day in the table above. **L1 bounds
+the AWS bill; only L2 bounds the Google one.** They are peers.
+
+Scope: **L-1, L1, L2, L4 — about half a day.** After it, the worst case on both cards is a number
+chosen rather than hoped for. L3 and CloudFront stay documented and unbuilt.
+
+The threat model still argues for restraint at the bottom of the list: this is a hobby project's dev
+subdomain with no traffic and no payoff for an attacker. The likeliest source of a surprise bill is
+not a botnet; it is **our own code** — a retry loop in the rating outbox, an E2E suite left pointed
+at `dev`, an agent-team run in a loop. L1 and L2 both catch that case, and it is the case that will
+actually happen.
+
+### L-1 — make the upload endpoint registered-only
+
+`POST /api/products/upload-image` is the only Gemini path still open to anonymous sessions
+(`extract-label` is already `requireRegistered`). It is pure exposure: `add-product.tsx:154` turns
+guests away client-side, and `POST /api/products` is `requireRegistered`, **so an anonymous upload
+can never become a product.** Adding the guard costs one line, breaks nothing, and deletes
+"anonymous accounts are free to mint" from the most expensive endpoint in the system. Registration
+requires a confirmed email, which is real friction.
+
+It is friction, not a bound — one registered attacker at 1 rps still spends $311/day — which is why
+it does not replace L2.
 
 ### L1 — stage and per-route throttling
 
@@ -188,21 +226,25 @@ Add to `aws_apigatewayv2_stage.default`:
 
 ```hcl
 default_route_settings {
-  throttling_rate_limit  = 10
-  throttling_burst_limit = 25
+  throttling_rate_limit  = 5
+  throttling_burst_limit = 15
 }
 ```
 
-Ten requests per second is generous for one developer and a handful of phones, and it bounds the
-downstream arithmetic: 10 rps sustained for a month is 25.9M requests, so even the *unstoppable*
-gateway charge is bounded at ~$26/mo rather than ~$26,000.
+Five requests per second is still 432,000 requests a day — generous for one developer and a handful
+of phones — and it bounds the *unstoppable* gateway charge at ~$13/mo rather than ~$26,000.
+
+**The residual is not only the gateway line.** At 10 rps the two log groups (API Gateway access-log
+JSON plus the server's `request:finish` line) ingest roughly 25 GB/month at ~$0.57/GB — about $15,
+which with the $26 gateway line consumes the entire $45 budget. That is why the default here is 5
+and not the 10 this ADR first proposed: it halves both numbers to ~$13 + ~$7.
 
 The Gemini path deserves a tighter number, but `route_settings` can only key a route that exists
 and we run a single `$default` catch-all. **Add an explicit `POST /api/products/upload-image` route
 pointing at the same integration, purely so it can carry its own throttle** (`rate 1, burst 2`).
 That is the whole trick — the route exists to be throttled, not to route.
 
-### L2 — daily Gemini cap
+### L2 — daily Gemini cap (co-equal with L1, not a follow-up)
 
 A persisted counter next to `services/geminiDeadline.ts`, checked before the model call in
 `imagePlausibilityService.ts` and `labelExtractionService.ts`. Over budget → `503`
@@ -223,9 +265,15 @@ It performs, in order:
 
 1. `ecs update-service --desired-count 0` — stops Gemini calls, RDS load and task egress. The
    biggest lever, and the fastest.
-2. `apigatewayv2 delete-api-mapping` — detaches the custom domain, stopping the billable request
-   count at the gateway. There is no cheaper sink: HTTP APIs have no Mock integration, and
-   throttled 429s are billed.
+2. `apigatewayv2 delete-api-mapping` **and** `update-api --disable-execute-api-endpoint` — the
+   mapping alone is not enough. The `*.execute-api` URL stays public (it is exported as the
+   `api_endpoint` output), so detaching the custom domain leaves the API fully reachable. There is
+   no cheaper sink than removing both: HTTP APIs have no Mock integration, and throttled 429s are
+   billed.
+
+   > **Unverified:** whether a request to a custom domain with no mapping is itself billed as an API
+   > call is not documented either way. Until someone checks, do not claim this step stops the meter
+   > — treat step 1 (`desired_count 0`) as the load-bearing one.
 3. Removes the `PublicReadAllowProcessed` statement from the bucket policy — closes S3 egress,
    which bypasses every other layer.
 4. Publishes to `aws_sns_topic.billing_alerts` so the stop is not silent.
@@ -363,6 +411,15 @@ Point 3 is the real cost of this option and the reason it is scoped to `dev` for
   its flat pricing. It is cheap insurance, not a real defence.
 * `budget.tf` remains AWS-only. The GCP budget is a separate Terraform provider / console artefact
   and will drift from this repo unless someone owns it.
+* **The `FORECASTED >= 100%` notification is not yet live in practice.** AWS needs several weeks of
+  billing history before it will emit a forecast, so on a young account the threshold ADR 0003
+  called "the one that matters" is silent. The `ACTUAL >= 80%` alert is the only one running today.
+* `imagePlausibilityService.ts` sends no `thinkingConfig`, so every classification may be paying for
+  default reasoning at the $9.00/M output rate. Measure this before sizing L2 — it moves the
+  per-call cost by roughly 3.5×, and therefore moves what a sensible daily cap even is.
+* L2 needs somewhere to keep a counter that survives a task replacement. The obvious home is
+  Postgres, which couples a cost guardrail to database availability; an in-memory counter would
+  reset on every deploy. Neither option is clean and the ADR does not resolve it.
 
 ## References
 
@@ -378,5 +435,8 @@ Point 3 is the real cost of this option and the reason it is scoped to `dev` for
   — the `awswaf:clientip:geo:region:<ISO>` label, and the `XX` fallback when a lookup fails.
 * [Disable billing to stop usage (Google Cloud)](https://cloud.google.com/billing/docs/how-to/notify)
   — the budget → Pub/Sub → detach-billing pattern behind L0/L4.
+* [Vertex AI Gemini pricing](https://cloud.google.com/vertex-ai/generative-ai/pricing) — the
+  $1.50/M input, $9.00/M output rates for `gemini-3.5-flash` used in the per-call table, and the
+  rule that Gemini 3.x bills thinking tokens as output at the full rate.
 * [ADR 0003](0003-always-on-production-cost-architecture.md) § step 6 — the billing alarm this ADR
   extends, and the ingress decision that constrains every option here.

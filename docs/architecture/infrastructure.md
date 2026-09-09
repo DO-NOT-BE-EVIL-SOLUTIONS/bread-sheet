@@ -320,8 +320,11 @@ the largest per-unit cost (Gemini, via `PLAUSIBILITY_MODE=gemini`) is a *Google*
 cannot see. See
 [ADR 0005](../architecture-decision-records/0005-cost-blast-radius-and-emergency-stop.md) for the
 blast-radius analysis and the layered emergency stop it proposes — in short, a stage throttle
-(`default_route_settings`) is ~10 lines of HCL and bounds the worst case at ~$0.86/day, and a Vertex
-AI RPM quota caps the Google side; the rest of the ladder is optional.
+(`default_route_settings`) is ~10 lines of HCL and bounds the AWS worst case, but only an in-process
+daily counter bounds the Gemini spend, because Vertex quotas are per-minute.
+
+Note also that `FORECASTED >= 100%` needs several weeks of billing history before AWS will emit a
+forecast, so on a young account `ACTUAL >= 80%` is the only notification actually running.
 
 ### VPC link keepalive
 
