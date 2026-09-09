@@ -77,7 +77,7 @@ See the [import map](#import-map) for IDs. Verified read-only against every done
 tables so the **public** subnets route `0.0.0.0/0` to the IGW. **No NAT gateway.**
 
 **Why this shape:** the Fargate task sits in the **public** subnets (with a public IP) so it can
-pull from GHCR and reach Supabase/GCP without a NAT (~$33/mo saved); RDS sits in the **private**
+pull from GHCR and reach Supabase/GCP without a NAT (~\$33/mo saved); RDS sits in the **private**
 subnets, reachable only from inside the VPC.
 
 **Definition of done:**
@@ -474,7 +474,7 @@ before serving, and shipping logs to CloudWatch. Everything it references alread
 
 *Task-level:*
 - `family = breadsheet-dev-server`; `requiresCompatibilities = ["FARGATE"]`; `networkMode = awsvpc`.
-- `cpu = "256"`, `memory = "512"` — the **smallest Fargate size** (~$9/mo always-on). Bump to
+- `cpu = "256"`, `memory = "512"` — the **smallest Fargate size** (~\$9/mo always-on). Bump to
   `512`/`1024` only if the container OOMs (watch the first migrate+boot). `db:deploy` (Prisma
   `migrate deploy`) is light, so 256/512 should hold.
 - `runtimePlatform = { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" }` — **X86_64 is
@@ -628,7 +628,7 @@ verified** (registrar NS → Route 53's four nameservers resolve publicly).
 port `3000`) that the ECS service (Objective 10) registers tasks into. Port `443` serves; port `80`
 301-redirects to `443`.
 
-**Why this shape — the ALB is the one real swap-cost vs EKS, and it earns its ~$16/mo:** it gives a
+**Why this shape — the ALB is the one real swap-cost vs EKS, and it earns its ~\$16/mo:** it gives a
 **stable DNS name + TLS termination + health-checked target replacement**. Fargate task IPs are
 ephemeral (every redeploy gets new ENIs), so nothing downstream should ever point at a task directly —
 it points at the ALB, and the **ECS service keeps the target group's membership in sync** as tasks
@@ -995,7 +995,7 @@ hierarchical path (`/breadsheet/dev/*`), and the **execution role** is granted s
 (SecureString), `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_DEFAULT_KEY`.
 
 **Why SSM (not Secrets Manager):** Parameter Store **Standard tier is free** (SecureString included)
-— Secrets Manager charges ~$0.40/secret/mo + API calls and adds rotation we don't need. ECS injects
+— Secrets Manager charges ~\$0.40/secret/mo + API calls and adds rotation we don't need. ECS injects
 both the same way (task-def `secrets` → env var in the container), so SSM is the cheaper equivalent.
 This is the same call already made for the RDS password in
 [ADR 0002](../architecture-decision-records/0002-rds-database-credentials.md).

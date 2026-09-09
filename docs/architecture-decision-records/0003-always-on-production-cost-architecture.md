@@ -22,24 +22,24 @@ Cost Explorer, account `493942067033`, `eu-west-1`, July 2026 — actual, not es
 
 | Usage type | July | Quantity |
 |---|---:|---|
-| `EU-LoadBalancerUsage` | $15.00 | 595 hr |
-| `EU-InstanceUsage:db.t4g.micro` | $10.09 | 593 hr |
-| `EU-PublicIPv4:InUseAddress` | $8.91 | 1,783 addr-hr (≈ 2.4 addresses) |
-| `EU-Fargate-vCPU-Hours:perCPU` | $6.01 | 148 vCPU-hr |
-| `EU-RDS:GP3-Storage` | $2.54 | 20 GiB |
-| `EU-Fargate-GB-Hours` | $1.32 | 297 GB-hr |
-| `HostedZone` | $0.50 | 1 |
-| `EU-LCUUsage` | $0.01 | 0.80 LCU-hr |
-| Tax (19%) | $8.43 | |
-| **Total** | **$52.80** | |
+| `EU-LoadBalancerUsage` | \$15.00 | 595 hr |
+| `EU-InstanceUsage:db.t4g.micro` | \$10.09 | 593 hr |
+| `EU-PublicIPv4:InUseAddress` | \$8.91 | 1,783 addr-hr (≈ 2.4 addresses) |
+| `EU-Fargate-vCPU-Hours:perCPU` | \$6.01 | 148 vCPU-hr |
+| `EU-RDS:GP3-Storage` | \$2.54 | 20 GiB |
+| `EU-Fargate-GB-Hours` | \$1.32 | 297 GB-hr |
+| `HostedZone` | \$0.50 | 1 |
+| `EU-LCUUsage` | \$0.01 | 0.80 LCU-hr |
+| Tax (19%) | \$8.43 | |
+| **Total** | **\$52.80** | |
 
 The ~595 hr readings across ALB/RDS/Fargate show `dev` already ran only ~80% of the month. The
-decisive figure is **`EU-LCUUsage` = $0.01**: the load balancer did one cent of actual work and
-charged $15.00 for existing.
+decisive figure is **`EU-LCUUsage` = \$0.01**: the load balancer did one cent of actual work and
+charged \$15.00 for existing.
 
 Normalised to a single 24/7 stage (730 hr), cloning this shape into production would cost:
 
-| | $/mo |
+| | \$/mo |
 |---|---:|
 | ALB (hourly, flat) | 18.40 |
 | RDS `db.t4g.micro` | 12.41 |
@@ -50,14 +50,14 @@ Normalised to a single 24/7 stage (730 hr), cloning this shape into production w
 | **Subtotal** | **46.51** |
 | **+ 19% tax** | **55.35** |
 
-Every line is flat. **$22.05/mo of it (ALB + its two per-AZ public IPv4 addresses) buys TLS
+Every line is flat. **\$22.05/mo of it (ALB + its two per-AZ public IPv4 addresses) buys TLS
 termination and health checking for a service handling hobby-scale traffic.**
 
 ## Decision Drivers
 
 * **Always-on is non-negotiable for prod.** Pause/resume tooling — the main `dev` cost lever — is
   inapplicable. Only flat cost reduction counts.
-* **Private-project budget.** ~$55/mo per stage is not sustainable; ~$25–35/mo total is.
+* **Private-project budget.** ~\$55/mo per stage is not sustainable; ~\$25–35/mo total is.
 * **Learning value is an explicit goal, not a side effect.** The stack exists partly to teach cloud
   architecture. An option that saves money by hiding the architecture (managed PaaS) scores worse
   than one that saves money by exposing a new layer.
@@ -74,34 +74,34 @@ Three independent axes. They compose — the ingress choice does not constrain t
 
 ### Axis 1 — Ingress (the largest flat cost)
 
-* **I-A — Keep the ALB.** Zero change. $18.40/mo + $7.30/mo for its two per-AZ public IPv4
+* **I-A — Keep the ALB.** Zero change. \$18.40/mo + \$7.30/mo for its two per-AZ public IPv4
   addresses. Buys layer-7 routing, TLS termination and target health checking we do not currently
   need at this scale.
 * **I-B — API Gateway HTTP API → VPC Link v2 → Cloud Map, no load balancer.** ECS Service Discovery
   registers tasks into Cloud Map; the HTTP API integrates directly with the Cloud Map service via a
   VPC link. Verified supported: private integrations connect to "an Application Load Balancer,
   Network Load Balancer, **or resources registered with an AWS Cloud Map service**". No hourly
-  charge — HTTP APIs bill ~$1.00 per million requests, custom domains and TLS are included. Keeps
+  charge — HTTP APIs bill ~\$1.00 per million requests, custom domains and TLS are included. Keeps
   Fargate, and with it every piece of existing IAM/WIF/CD work.
 * **I-C — Lambda container image + Function URL.** Same Docker image via `aws-lambda-web-adapter`.
-  Kills ALB *and* Fargate *and* the task's public IP. Effectively $0 at free-tier traffic.
+  Kills ALB *and* Fargate *and* the task's public IP. Effectively \$0 at free-tier traffic.
 * **I-D — AWS App Runner.** Managed container service with TLS, custom domain and a free VPC
-  connector; roughly $3–10/mo depending on instance size, mostly provisioned-memory charge.
+  connector; roughly \$3–10/mo depending on instance size, mostly provisioned-memory charge.
 * **I-E — Cloudflare Tunnel sidecar, no AWS ingress at all.** A `cloudflared` container in the same
   task definition establishes an outbound-only tunnel; Cloudflare terminates TLS at its edge and
-  routes to the task. Kills the ALB with no AWS replacement — $0/mo, no per-request charge, and no
+  routes to the task. Kills the ALB with no AWS replacement — \$0/mo, no per-request charge, and no
   API Gateway payload or timeout ceiling. Keeps Fargate and everything attached to it.
 
 ### Axis 2 — Database
 
-* **D-A — RDS `db.t4g.micro` on demand.** $12.41 + $2.54 storage. Status quo; ADR 0002 IAM auth
+* **D-A — RDS `db.t4g.micro` on demand.** \$12.41 + \$2.54 storage. Status quo; ADR 0002 IAM auth
   applies unchanged.
 * **D-B — RDS with a 1-year no-upfront Reserved Instance.** Same instance, ~30% off the instance
-  hour (~$8.40). No architectural change; a 12-month commitment.
+  hour (~\$8.40). No architectural change; a 12-month commitment.
 * **D-C — Aurora Serverless v2, min 0 ACU (auto-pause).** Scales to zero, billing storage only when
   paused.
 * **D-D — Supabase Postgres (free tier).** Supabase is already a dependency for auth. The free tier
-  includes a Postgres database at $0.
+  includes a Postgres database at \$0.
 
 ### Axis 3 — The `dev` stage itself
 
@@ -134,7 +134,7 @@ leaves permanently dead code in the root. `dev` therefore goes first and is the 
 
 Production target, 730 hr:
 
-| | $/mo |
+| | \$/mo |
 |---|---:|
 | Fargate 0.25 / 0.5 × 1 task | 9.01 |
 | RDS `db.t4g.micro` + 20 GiB gp3 | 14.95 |
@@ -145,7 +145,7 @@ Production target, 730 hr:
 | **Subtotal** | **28.82** |
 | **+ 19% tax** | **~34.30** |
 
-**≈ 38% below cloning the current shape**, and with S-B the `dev` stage contributes ~$0 at rest
+**≈ 38% below cloning the current shape**, and with S-B the `dev` stage contributes ~\$0 at rest
 instead of a second standing charge.
 
 > The Cloud Map line is the one estimate in this table rather than a measured or list-price figure —
@@ -165,7 +165,7 @@ pays a cold start: container-image init + Prisma client construction + `pg` conn
 + an RDS IAM token mint (ADR 0002), on top of an already-slow path when the Gemini plausibility gate
 (`PLAUSIBILITY_MODE=gemini`) is involved. Barcode scanning is the app's primary interaction and is
 latency-sensitive. Provisioned concurrency removes the cold start and also removes the saving.
-**The $9.01/mo Fargate task is not a compute cost, it is the price of being warm** — and it is the
+**The \$9.01/mo Fargate task is not a compute cost, it is the price of being warm** — and it is the
 one flat charge in the stack that is clearly worth paying. (I-C remains a reasonable fit for a
 *non*-latency-sensitive stage, which is the opposite of the intuition that cheap-at-idle suits a
 quiet prod.)
@@ -174,10 +174,10 @@ quiet prod.)
 `ImageRepository.ImageRepositoryType` accepts only `ECR | ECR_PUBLIC`, and `ImageIdentifier` is
 regex-constrained to ECR hostnames. GHCR cannot be a source. Adopting it would mean adding an ECR
 push to CD and abandoning the deliberate "registry is external and free" property, for a saving of
-roughly $6/mo over the chosen option and materially less to learn.
+roughly \$6/mo over the chosen option and materially less to learn.
 
 **I-E (Cloudflare Tunnel) is rejected on the learning-value driver alone, and it is the closest
-call in this ADR.** On cost it is a wash with I-B — $0 against ~$0.71/mo — and on simplicity it wins
+call in this ADR.** On cost it is a wash with I-B — \$0 against ~\$0.71/mo — and on simplicity it wins
 outright: no Cloud Map, no SRV records, no VPC link, no stage-path mapping, no ACM certificate, and
 critically **none of the API Gateway payload or integration-timeout ceilings** that make step 0
 below a blocking gate. It loses on exactly one axis: it saves money by *removing* an architectural
@@ -194,7 +194,7 @@ floor — several times a `db.t4g.micro` on a 24/7 basis. It optimises for burst
 low-but-nonzero-traffic prod is the one shape where it reliably loses. It would be a good fit for an
 ephemeral `dev`, where genuine multi-day silence is the norm.
 
-**D-D (Supabase Postgres) is deferred, not rejected.** It is the cheapest credible database at $0 and
+**D-D (Supabase Postgres) is deferred, not rejected.** It is the cheapest credible database at \$0 and
 consolidates on an existing dependency. It is not chosen now because it would discard the working RDS
 IAM auth from ADR 0002, concentrate both auth and primary data in one free-tier vendor, and free-tier
 projects pause after sustained inactivity.
@@ -202,11 +202,11 @@ projects pause after sustained inactivity.
 RDS is ~52% of the target bill the moment the ingress change lands, so "revisit when it becomes
 dominant" is a prediction, not a trigger — and deferrals with no trigger become permanent by
 default. **The trigger is therefore D-B, not D-D:** the Reserved Instance is the intended answer for
-the RDS line (~$12.41 → ~$8.40, no architectural change, no vendor concentration). D-D is reopened
+the RDS line (~\$12.41 → ~\$8.40, no architectural change, no vendor concentration). D-D is reopened
 only if the RI is declined *and* the RDS line still needs to fall — i.e. it is the answer to a
 budget problem, not to an architecture problem.
 
-**S-A vs S-B:** scheduling `dev` saves ~$13/mo of compute but cannot touch its $22/mo of ALB + IPv4.
+**S-A vs S-B:** scheduling `dev` saves ~\$13/mo of compute but cannot touch its \$22/mo of ALB + IPv4.
 Destroying it saves all of it. The stack is fully Terraform-owned with a documented snapshot/restore
 path, so recreation is a known quantity — and repeated create/destroy cycles surface hidden
 dependencies (cert validation, IAM resource IDs, image pin drift) far better than an idling stack
@@ -244,7 +244,7 @@ in-place change, side-stepping the `service_registries` ForceNew hazard in step 
   60 days transitions to `INACTIVE`; API Gateway deletes its network interfaces and dependent
   requests **fail** until it reprovisions, which takes minutes. This is a weaker form of the very
   argument used to reject I-C — rarer (60 days, not seconds) but worse when it fires (failures, not
-  latency). It also qualifies the claim that $9.01/mo buys being warm: it buys a warm *task* behind
+  latency). It also qualifies the claim that \$9.01/mo buys being warm: it buys a warm *task* behind
   an ingress that can still go cold. Mitigated by the keepalive in Implementation step 4, which is
   required rather than optional.
 * API Gateway's request-based pricing is unbounded in principle. At hobby traffic it is cents, but
@@ -346,8 +346,8 @@ Record two things, because this run is the only cheap chance at the second:
    256 CPU / 512 MB (`ecs.tf:30-31`) and the server runs `sharp`/libvips over a multer
    `memoryStorage()` buffer capped at 4 MB (`productRoutes.ts:27-29`). Once the ALB is gone the
    single task *is* the stage, so an OOM is an outage rather than a shed target. If utilisation
-   peaks above ~75 %, raise the task to 1 GB (~+$3.60/mo) as part of step 2 — cheap against the
-   $22/mo the ingress change frees.
+   peaks above ~75 %, raise the task to 1 GB (~+\$3.60/mo) as part of step 2 — cheap against the
+   \$22/mo the ingress change frees.
 
 > **Step 0a clips this measurement, deliberately.** A call that would have taken 24 s is now aborted
 > at 20 s and answers `503 upstream_timeout`; the raw tail is no longer observable from the client.
@@ -414,7 +414,7 @@ serial image uploads through sharp/libvips and two multimodal calls. At the old 
 peak would have been ~24 %. The recommendation was made from reasoning about libvips rather than
 measurement, and the measurement does not support it. The sample used 521 KB images against a 4 MB
 multer cap, and CloudWatch's 1-minute `Maximum` can miss a sub-minute spike, so this is evidence of
-no pressure rather than proof — but it is enough to revert to `512` and keep the ~$1.62/mo unless
+no pressure rather than proof — but it is enough to revert to `512` and keep the ~\$1.62/mo unless
 the single-task-is-the-whole-stage argument is judged worth paying for on its own.
 
 #### Outcomes
@@ -428,7 +428,7 @@ the single-task-is-the-whole-stage argument is judged worth paying for on its ow
   judged too large right now, fall back to **I-E (Cloudflare Tunnel)**, which reaches the same cost
   target without a timeout ceiling.
 
-Retaining the ALB is *not* a fallback: it reinstates $18.40/mo **per stage** and erases the entire
+Retaining the ALB is *not* a fallback: it reinstates \$18.40/mo **per stage** and erases the entire
 saving this ADR exists to capture. It also only defers the problem — an unbounded upstream call
 fails at 60 s instead of 30 s, so 0a is required either way.
 
@@ -451,7 +451,7 @@ no in-place ingress swap on a running service.
 > at the parent before anything resolves — and `aws_acm_certificate.server` validates *through* that
 > zone, so the certificate re-issue blocks behind the same manual step. Protect both with
 > `lifecycle { prevent_destroy = true }` (or move them to a separate long-lived root). This keeps
-> $0.50/mo standing, which is the correct trade against a manual DNS step on every recreate.
+> \$0.50/mo standing, which is the correct trade against a manual DNS step on every recreate.
 
 ### 2. Add a container health check (**blocking prerequisite**)
 
@@ -588,16 +588,16 @@ Mirror the existing pattern in `security.tf` — each hop references the previou
 * new `aws_security_group.vpclink` — egress to the task SG on 3000.
 * task SG ingress on 3000 sources from the **VPC link SG** rather than the ALB SG.
 * task SG keeps `assign_public_ip = true` and its egress: it still pulls from GHCR and reaches
-  Supabase, GCP (WIF/Vertex) and SSM through the IGW. This is why the one remaining $3.65/mo public
-  IPv4 address stays — removing it would require NAT at ~$33/mo, which is strictly worse.
+  Supabase, GCP (WIF/Vertex) and SSM through the IGW. This is why the one remaining \$3.65/mo public
+  IPv4 address stays — removing it would require NAT at ~\$33/mo, which is strictly worse.
 * RDS SG unchanged.
 
 ### 6. Guardrail (required) and RDS Reserved Instance (later)
 
-* **Billing alarm** — an AWS Budget with an alert at ~$40/mo. This is the mitigation for trading a
+* **Billing alarm** — an AWS Budget with an alert at ~\$40/mo. This is the mitigation for trading a
   flat ALB charge for per-request pricing and should land with step 4, not after.
 * **RDS RI** — once prod has run stably for a month or two, buy a 1-year no-upfront Reserved
-  Instance for the `db.t4g.micro` (~$12.41 → ~$8.40). Purely financial; no resource change. Defer
+  Instance for the `db.t4g.micro` (~\$12.41 → ~\$8.40). Purely financial; no resource change. Defer
   until the instance class is settled, since an RI is locked to it — and specifically **do not buy
   until step 0 has resolved.** If the Gemini paths force the asynchronous-upload rework, the write
   pattern against the database changes shape, and a 12-month commitment to an instance class should

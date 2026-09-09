@@ -19,8 +19,8 @@ remaining long-lived secret and is worth scrutinising.
 
 * **Keyless aesthetic:** the stack avoids long-lived credentials elsewhere; a static DB password
   is the odd one out.
-* **Cost:** the whole point of the Fargate rebuild is low always-on cost. RDS Proxy (~$15/mo) and
-  Secrets Manager (~$0.40/secret/mo + rotation Lambda) are non-trivial against that baseline.
+* **Cost:** the whole point of the Fargate rebuild is low always-on cost. RDS Proxy (~\$15/mo) and
+  Secrets Manager (~\$0.40/secret/mo + rotation Lambda) are non-trivial against that baseline.
 * **Application complexity:** Prisma's connection string is static by default. Anything that
   rotates credentials must hook into connection creation.
 * **Time-to-working-stack:** the hand-build needs to reach a deployable end-to-end state
@@ -34,12 +34,12 @@ remaining long-lived secret and is worth scrutinising.
   role can read it.
 * **B — AWS Secrets Manager with rotation.** Managed rotation Lambda rotates the password on a
   schedule; the app fetches the current secret per new connection. Auto-rotating, but adds
-  ~$0.40/secret/mo plus the rotation Lambda, and still stores a password.
+  ~\$0.40/secret/mo plus the rotation Lambda, and still stores a password.
 * **C — RDS IAM database authentication.** No stored DB password at all. The app mints a
   short-lived (15 min) IAM auth token per new connection; the DB user is granted `rds_iam`; TLS
-  is mandatory. Most keyless, $0 extra, but requires application code.
+  is mandatory. Most keyless, \$0 extra, but requires application code.
 * **C-via-RDS-Proxy.** IAM auth fronted by RDS Proxy so the app needs no token logic — rejected
-  on cost (~$15/mo defeats the cheap-prod goal).
+  on cost (~\$15/mo defeats the cheap-prod goal).
 
 ### The mechanism that makes B and C feasible with Prisma
 
