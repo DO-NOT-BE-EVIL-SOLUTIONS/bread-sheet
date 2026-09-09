@@ -319,7 +319,9 @@ no throttle (so the account default of 10,000 rps applies), API Gateway bills th
 the largest per-unit cost (Gemini, via `PLAUSIBILITY_MODE=gemini`) is a *Google* charge this budget
 cannot see. See
 [ADR 0005](../architecture-decision-records/0005-cost-blast-radius-and-emergency-stop.md) for the
-blast-radius analysis and the layered emergency stop it proposes.
+blast-radius analysis and the layered emergency stop it proposes — in short, a stage throttle
+(`default_route_settings`) is ~10 lines of HCL and bounds the worst case at ~$0.86/day, and a Vertex
+AI RPM quota caps the Google side; the rest of the ladder is optional.
 
 ### VPC link keepalive
 
