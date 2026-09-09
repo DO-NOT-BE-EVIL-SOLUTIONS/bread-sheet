@@ -104,9 +104,10 @@ resource "aws_ecs_task_definition" "server" {
       { name = "PLAUSIBILITY_MODE", value = "gemini" },
       # ADR 0005 L2. config.ts requires this whenever VISION_MODE=llm or
       # PLAUSIBILITY_MODE=gemini (both true here) — omitting it crash-loops the
-      # task at boot, it does not fall back to unlimited. Interim value until
-      # ADR 0005 step 8 raises it to 300 (thinking-disabled cost confirmed).
-      { name = "GEMINI_DAILY_CALL_CAP", value = "100" },
+      # task at boot, it does not fall back to unlimited. Raised from the 100
+      # interim value to 300 (ADR 0005 step 8) once step 2 confirmed the
+      # thinking-disabled cost at ~$0.0036/call, blended — 300/day ≈ $32/mo.
+      { name = "GEMINI_DAILY_CALL_CAP", value = "300" },
       { name = "APP_DEEP_LINK_SCHEME", value = "breadsheet" },
       { name = "GOOGLE_GENAI_USE_VERTEXAI", value = "true" },
       { name = "GOOGLE_CLOUD_PROJECT", value = var.gcp_project },
