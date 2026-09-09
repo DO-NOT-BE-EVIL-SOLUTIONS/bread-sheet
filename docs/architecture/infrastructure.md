@@ -221,10 +221,13 @@ terraform/
   s3.tf           # images bucket + public-access-block + ownership + policy + CORS
   ssm.tf          # SSM parameters (Supabase URL + key)
   ecs.tf          # ECS cluster + task definition + service
-  api-gateway.tf  # HTTP API + VPC link + integration + $default route/stage + custom domain + access logs
+  api-gateway.tf  # HTTP API + VPC link + integration + $default route/stage (+ throttled upload-image
+                  # route) + custom domain + access logs
   service-discovery.tf # Cloud Map private DNS namespace + SRV service
   dns.tf          # Route 53 zone (dev.bread-sheet.com) + ACM cert + validation + A-alias → API Gateway
   gcp-wif.tf      # GCP WIF pool + AWS provider + SA + bindings
+  budget.tf       # SNS billing_alerts topic (+ its consolidated access policy) + monthly AWS budget
+  detection.tf    # ADR 0005 D: Cost Anomaly Detection, API Gateway + GeminiCalls alarms, GCP budget
   outputs.tf      # Useful references (URLs, ARNs, names)
   environments/
     dev.tfvars           # Variable values for dev
@@ -314,17 +317,53 @@ Terraform cannot perform the confirmation, so such a resource sits permanently *
 and shows as drift on every plan. Note also `aws_sns_topic_policy` granting `budgets.amazonaws.com`
 publish rights — without it the budget applies cleanly and silently delivers nothing.
 
-**This is an alert, not a stop.** Nothing in `terraform/` currently halts spending — the stage sets
-no throttle (so the account default of 10,000 rps applies), API Gateway bills throttled 429s, and
-the largest per-unit cost (Gemini, via `PLAUSIBILITY_MODE=gemini`) is a *Google* charge this budget
-cannot see. See
+**This budget alone is not a stop.** It is one AWS-only signal on a monthly cycle; see
 [ADR 0005](../architecture-decision-records/0005-cost-blast-radius-and-emergency-stop.md) for the
-blast-radius analysis and the layered emergency stop it proposes — in short, a stage throttle
-(`default_route_settings`) is ~10 lines of HCL and bounds the AWS worst case, but only an in-process
-daily counter bounds the Gemini spend, because Vertex quotas are per-minute. The ADR's consequence budget sets the caps at 2 rps and 30 Gemini calls/day, and puts the image bucket behind a CloudFront distribution on a **flat-rate Free plan** (no overage charges — the only structural cost ceiling on AWS), which together put the sustained-attack worst case at \$10.35/mo on top of the ~\$34/mo flat baseline.
+full blast-radius analysis and the layered emergency stop, of which this budget is one layer among
+several (below). Note also that `FORECASTED >= 100%` needs several weeks of billing history before
+AWS will emit a forecast, so on a young account `ACTUAL >= 80%` is the only notification actually
+running.
 
-Note also that `FORECASTED >= 100%` needs several weeks of billing history before AWS will emit a
-forecast, so on a young account `ACTUAL >= 80%` is the only notification actually running.
+### Cost blast radius — L1 throttle + D detection (ADR 0005, Phase 1)
+
+**L1 — `api-gateway.tf`.** `aws_apigatewayv2_stage.default` sets `default_route_settings` to
+**5 rps / burst 25** (the account default is 10,000 rps, so this is the only thing standing between
+an unbounded gateway bill and a bounded one). A second route, `POST /api/products/upload-image`,
+points at the *same* integration as `$default` — it exists purely so it can carry its own tighter
+`route_settings` (**1 rps / burst 5**) on the Gemini upload path; do not remove it as dead code.
+
+**D — `detection.tf`.** Four free signals, all publishing to the existing
+`aws_sns_topic.billing_alerts` (whose access policy — `data.aws_iam_policy_document.billing_alerts`
+in `budget.tf` — is the single place all of D's and the budget's publishers are granted `SNS:Publish`;
+SNS allows only one policy per topic, so new publishers extend that one document rather than adding a
+second `aws_sns_topic_policy`):
+
+* `aws_ce_anomaly_monitor` + `aws_ce_anomaly_subscription` (Cost Anomaly Detection, `≥ $5` anomaly,
+  `IMMEDIATE`). Both must use the **`aws.use1`** provider alias declared in `main.tf` — Cost
+  Explorer's anomaly APIs are only reachable via the us-east-1 endpoint regardless of which region is
+  actually monitored. **The monitor is imported, not created**: AWS allows exactly one
+  `DIMENSIONAL`/`SERVICE` monitor per account, and this account already had one
+  (`Default-Services-Monitor`, console-created years before this stack existed, carrying its own
+  personal \$100/40%-threshold email subscription — left untouched). If this ever needs recreating
+  from scratch on a fresh account, drop the import and let Terraform create it.
+* `aws_cloudwatch_metric_alarm` on `AWS/ApiGateway` `Count` (`> 1000` in 5 min — sees requests the L1
+  throttle rejected too, which is the point).
+* `aws_cloudwatch_log_metric_filter` on `/ecs/breadsheet-dev-server` matching `request:finish` lines
+  for the two Gemini paths, feeding a `GeminiCalls` metric, plus an alarm at `> 50`/hour. No
+  application change — `requestLogger.ts`'s structured log line already carries `path` in JSON (the
+  task runs `NODE_ENV=production`).
+* `google_billing_budget.dev` on `breadsheet-496522`, thresholds at 5%/12.5%/25% of a 40-unit budget.
+  **This billing account bills in EUR, not USD** (`gcloud billing accounts describe
+  01E7A9-4D7E3E-165061`) — a `currency_code` mismatch is rejected by the Budgets API as a bare
+  `400 invalid argument` with no field-level detail, so the budget is €40 with thresholds at
+  €2/€5/€10, standing in for the ADR's dollar figures rather than a currency conversion of them. The
+  `google` provider sets `billing_project`/`user_project_override` — local ADC has no quota project by
+  default, and `billingbudgets.googleapis.com` (unlike the WIF-only APIs used until now) requires one.
+
+Both remain to land per the ADR's ordering: **L2** (the in-process daily Gemini counter — the layer
+that actually bounds the Google spend, since Vertex quotas are per-minute and a rate throttle can't
+express "per day") and **L5** (CloudFront flat-rate Free plan + OAC over the image bucket, the only
+layer that removes a meter rather than choosing a number).
 
 ### VPC link keepalive
 

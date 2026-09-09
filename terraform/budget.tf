@@ -28,8 +28,12 @@ resource "aws_sns_topic" "billing_alerts" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-billing-alerts" })
 }
 
-# Budgets is a service principal, so it needs explicit publish rights on the
-# topic. Without this the budget applies but silently never delivers.
+# Every publisher below is an AWS service principal, so each needs explicit
+# publish rights on the topic — without this a resource applies cleanly but
+# silently never delivers. This one policy document is the single access
+# control point for the topic; ADR 0005's detection layer (detection.tf) adds
+# publishers here rather than attempting a second aws_sns_topic_policy (SNS
+# allows only one policy per topic).
 data "aws_iam_policy_document" "billing_alerts" {
   statement {
     sid     = "AllowBudgetsToPublish"
@@ -44,6 +48,49 @@ data "aws_iam_policy_document" "billing_alerts" {
     resources = [aws_sns_topic.billing_alerts.arn]
 
     # Confused-deputy guard: only *our* account's budgets may publish here.
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  # ADR 0005 D: AWS Cost Anomaly Detection subscription (detection.tf).
+  statement {
+    sid     = "AllowCostAnomalyDetectionToPublish"
+    effect  = "Allow"
+    actions = ["SNS:Publish"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["costalerts.amazonaws.com"]
+    }
+
+    resources = [aws_sns_topic.billing_alerts.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  # ADR 0005 D: the API Gateway flood alarm and the GeminiCalls log-metric alarm
+  # (detection.tf). Unlike Budgets, the CloudWatch console normally adds this
+  # statement for you on first use of an existing topic — Terraform must do it
+  # explicitly, or the alarms apply cleanly and never notify anyone.
+  statement {
+    sid     = "AllowCloudWatchAlarmsToPublish"
+    effect  = "Allow"
+    actions = ["SNS:Publish"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudwatch.amazonaws.com"]
+    }
+
+    resources = [aws_sns_topic.billing_alerts.arn]
+
     condition {
       test     = "StringEquals"
       variable = "aws:SourceAccount"

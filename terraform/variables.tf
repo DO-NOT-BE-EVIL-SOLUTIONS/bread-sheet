@@ -119,6 +119,17 @@ variable "gcp_wif_pool_id" {
   description = "Workload Identity Pool ID for Fargate."
   default     = "breadsheet-dev"
 }
+
+variable "gcp_billing_account" {
+  type        = string
+  description = <<-EOT
+    GCP Billing Account ID (format XXXXXX-XXXXXX-XXXXXX) that owns gcp_project.
+    Backs the google_billing_budget in detection.tf (ADR 0005 D's email
+    thresholds; step 7 later extends the same resource with L4's Pub/Sub
+    hard-stop trigger). Find it with:
+      gcloud billing projects describe <gcp_project> --format="value(billingAccountName)"
+  EOT
+}
 # ── Billing guardrail (ADR 0003 step 6) ───────────────────────────────────────
 
 variable "budget_limit_usd" {

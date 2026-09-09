@@ -14,3 +14,7 @@ enable_google_wif = true
 gcp_project       = "breadsheet-496522"
 gcp_location      = "global"
 gcp_wif_pool_id   = "breadsheet-dev"
+
+# ADR 0005 D/L4 — google_billing_budget in detection.tf.
+# gcloud billing projects describe breadsheet-496522 --format="value(billingAccountName)"
+gcp_billing_account = "01E7A9-4D7E3E-165061"
