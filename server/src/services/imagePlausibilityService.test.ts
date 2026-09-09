@@ -91,6 +91,8 @@ describe('imagePlausibilityService', () => {
       const call = mockGenerateContent.mock.calls[0][0];
       expect(call.model).toBe('gemini-3.5-flash');
       expect(call.config.responseMimeType).toBe('application/json');
+      // ADR 0005 L2: thinking disabled — reasoning tokens bill as output at the full rate.
+      expect(call.config.thinkingConfig).toEqual({ thinkingBudget: 0 });
       expect(call.contents[0].parts[0].inlineData).toEqual({
         mimeType: 'image/jpeg',
         data: buffer.toString('base64'),
