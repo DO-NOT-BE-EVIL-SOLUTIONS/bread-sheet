@@ -13,6 +13,12 @@
 #
 # The request must traverse the **custom domain**, not the task directly — it is
 # traffic through the link that resets the 60-day clock.
+#
+# ADR 0005 Phase 2: that custom domain is now the CloudFront distribution in
+# phase2.tf, which geo-restricts to Germany — and this Lambda runs in AWS's own
+# eu-west-1, not on a German network. It sends the same X-Edge-Bypass header CI
+# does (phase2.tf's WAF rule "edge-bypass") to skip the geo rule, same as
+# every other consumer of this endpoint that isn't the dev team itself.
 
 data "archive_file" "vpclink_keepalive" {
   type        = "zip"
@@ -27,7 +33,12 @@ data "archive_file" "vpclink_keepalive" {
       export const handler = async () => {
         const url = process.env.KEEPALIVE_URL;
         const startedAt = Date.now();
-        const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(15_000),
+          // ADR 0005 Phase 2: skips the CloudFront WAF's DE-only geo rule —
+          // this Lambda runs in eu-west-1, not on a German network.
+          headers: { 'X-Edge-Bypass': process.env.EDGE_BYPASS_SECRET },
+        });
         const result = { url, status: res.status, elapsedMs: Date.now() - startedAt };
         console.log(JSON.stringify(result));
         if (!res.ok) throw new Error(`keepalive: $${url} returned $${res.status}`);
@@ -71,7 +82,8 @@ resource "aws_lambda_function" "vpclink_keepalive" {
 
   environment {
     variables = {
-      KEEPALIVE_URL = "https://${aws_route53_record.server.fqdn}/"
+      KEEPALIVE_URL      = "https://${aws_route53_record.server.fqdn}/"
+      EDGE_BYPASS_SECRET = random_password.edge_bypass_secret.result
     }
   }
 

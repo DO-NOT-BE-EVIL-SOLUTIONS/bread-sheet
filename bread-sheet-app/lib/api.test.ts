@@ -77,4 +77,34 @@ describe('api', () => {
       expect(apiErr.message).toBe('Request failed with status 500');
     }
   });
+
+  // ADR 0005 Phase 2: EXPO_PUBLIC_EDGE_BYPASS_SECRET is read once at module
+  // load, so exercising both branches needs a fresh module instance per case.
+  it('does not send X-Edge-Bypass when EXPO_PUBLIC_EDGE_BYPASS_SECRET is unset', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    });
+    await api.get('/api/products/123');
+
+    const headers = (global.fetch as jest.Mock).mock.calls[0][1].headers;
+    expect(headers).not.toHaveProperty('X-Edge-Bypass');
+  });
+
+  it('sends X-Edge-Bypass with the configured secret when set (CI only — never the release build)', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    });
+
+    process.env.EXPO_PUBLIC_EDGE_BYPASS_SECRET = 'ci-secret';
+    jest.resetModules();
+    const { api: apiWithBypass } = require('./api') as typeof import('./api');
+    delete process.env.EXPO_PUBLIC_EDGE_BYPASS_SECRET;
+
+    await apiWithBypass.get('/api/products/123');
+
+    const headers = (global.fetch as jest.Mock).mock.calls[0][1].headers;
+    expect(headers['X-Edge-Bypass']).toBe('ci-secret');
+  });
 });

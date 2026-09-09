@@ -101,6 +101,11 @@ interface Config {
   // site can actually run (see `geminiNeeded` below); `null` otherwise so mock
   // stages never need the var. `services/geminiQuota.ts` enforces it.
   geminiDailyCallCap: number | null;
+  // ADR 0005 Phase 2. `null` is a legitimate "off" state (local dev, tests,
+  // any stage with no CloudFront in front) — unlike this file's other vars,
+  // there is nothing to fail fast on here. `middlewares/requireOriginSecret.ts`
+  // is a no-op when this is null and enforces it otherwise.
+  originVerifySecret: string | null;
 }
 
 const visionMode = readVisionMode();
@@ -167,6 +172,7 @@ const config: Config = {
   assetBaseUrl: readAssetBaseUrl(),
   appDeepLinkScheme,
   geminiDailyCallCap,
+  originVerifySecret: process.env.ORIGIN_VERIFY_SECRET || null,
 };
 
 export default config;
