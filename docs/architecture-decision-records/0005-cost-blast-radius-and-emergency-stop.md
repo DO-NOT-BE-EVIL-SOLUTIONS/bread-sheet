@@ -1,6 +1,6 @@
 # Cost Blast Radius and Emergency Stop
 
-* Status: **Accepted — in implementation** (started 2026-09-09; Phase 1 scope below, Phase 2 sequenced after it)
+* Status: **Accepted — Phase 1 implemented** (2026-09-09, same day; Phase 2 sequenced after it, not started)
 * Date: 2026-09-09
 
 ## Context and Problem Statement
@@ -467,12 +467,13 @@ the same function, next to `services/geminiDeadline.ts`.
 
 **Implemented (2026-09-09) as `services/geminiQuota.ts` (`reserveGeminiCall`, `GeminiDailyQuotaExhaustedError`).**
 The call site is `labelExtractionLlmService.ts` specifically (the Gemini path of label extraction;
-the text and OCR paths never call Gemini and never reserve). `dev` ships with
-`GEMINI_DAILY_CALL_CAP=100` per the interim value above. Verified directly against the local
-Postgres: two reservations at `cap=2` return `calls` 1 and 2, a third returns zero rows and inserts
-nothing extra — the `WHERE calls < cap` guard on the `ON CONFLICT DO UPDATE` branch is one atomic
-statement, not a read-then-write, so the race the sizing rule worries about doesn't exist at the SQL
-level.
+the text and OCR paths never call Gemini and never reserve). `dev` shipped with the interim
+`GEMINI_DAILY_CALL_CAP=100`, then step 8 (2026-09-09, same day) raised it to **300** once step 2's
+measurement confirmed the thinking-disabled cost — 300 × \$0.003568 × 30 ≈ \$32.11/mo, matching the
+sizing rule's \$32.40/mo target. Verified directly against the local Postgres: two reservations at
+`cap=2` return `calls` 1 and 2, a third returns zero rows and inserts nothing extra — the
+`WHERE calls < cap` guard on the `ON CONFLICT DO UPDATE` branch is one atomic statement, not a
+read-then-write, so the race the sizing rule worries about doesn't exist at the SQL level.
 
 ### D — detection
 
@@ -843,7 +844,7 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 | 5 | **L2** — `GeminiDailyUsage` Prisma model + migration, reservation function beside `geminiDeadline.ts`, `GEMINI_DAILY_CALL_CAP` in `config.ts` (fail-fast, validated integer), `503 daily_quota_exhausted`, tests incl. concurrency and fail-closed; `CLAUDE.md` env-var block, `backend.md`, Bruno docs for the new 503 | `server/` | ✅ |
 | 6 | **L5** — distribution + OAC + WAF ACL + Free plan subscription; remove `PublicReadAllowProcessed`; `ASSET_BASE_URL` → distribution domain (task env var: forced replacement); fix `rds.tf` to use `var.db_max_allocated_storage` while in the file | `terraform/`, `infrastructure.md` | ✅ applied (distribution live, verified end-to-end); ✅ Free plan console step |
 | 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `terraform/l4.tf` | ✅ applied; wiring verified with synthetic under-budget messages (real detach path deliberately never exercised) |
-| 8 | Raise `GEMINI_DAILY_CALL_CAP` on `dev` to 300 once step 2 confirms ~\$0.0036/call | task env | ☐ |
+| 8 | Raise `GEMINI_DAILY_CALL_CAP` on `dev` to 300 once step 2 confirms ~\$0.0036/call | task env | ✅ |
 | P2 | **Phase 2** — API distribution on Free plan 2: WAF geo `DE` + rate rule + header insertion secret, `disable_execute_api_endpoint`, `us-east-1` cert, DNS alias; CI allow path | `terraform/`, `server/app.ts`, `.github/workflows/test-native-e2e.yml` | after Phase 1 |
 
 Steps 1, 3, 4 and 6 are independent of each other and can land in any order; 5 depends on 2 only
