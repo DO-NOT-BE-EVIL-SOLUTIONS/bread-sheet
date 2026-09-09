@@ -159,6 +159,29 @@ is the decision.**
 | **L3** Panic | CloudWatch `Count` alarm → SNS → Lambda | minutes | AWS gateway + all downstream |
 | **L4** Backstop | GCP budget → disable billing; AWS Budget Action → stop RDS | hours | last resort, both cards |
 
+### Proportionality — what is actually worth building
+
+The layers are not equally worth their effort, and the table above flatters the expensive ones.
+Ranked by risk removed per hour spent:
+
+| Layer | Effort | Residual after it | Verdict |
+|---|---|---|---|
+| **L1** stage throttle | ~10 lines of HCL, one apply | $864/day → **$0.86/day** | **Do it.** Three orders of magnitude for twenty minutes. |
+| **L0** Vertex RPM quota | one console setting | Google bill hard-capped | **Do it.** Five minutes. |
+| **L4** GCP billing detach | ~1 hour | the only true hard stop anywhere | Do it when convenient. |
+| **L2** app-level daily cap | few hours + tests | mostly redundant once L0 exists | Optional. |
+| **L3** panic Lambda | half a day, destructive, false-positive risk | guards a residual L1 already caps at ~$26/mo | **Probably not worth it.** |
+| **Geo / CloudFront** | a day+, second ACM cert in `us-east-1`, shared-secret header, DNS change | costs *more* per request above free tier | **Not for cost.** Only if surface reduction is wanted for its own sake. |
+
+**L0 + L1 together are about thirty minutes of work and remove essentially all of the tail risk.**
+Everything below them in that table is defending a bill that L1 has already bounded at under a
+dollar a day. This ADR documents the full ladder so the reasoning survives, but scoping the
+implementation to the top two rows is the proportionate response — and the honest reading of the
+threat model, which is a hobby project's dev subdomain with no traffic and no payoff for an
+attacker. The likeliest source of a surprise bill is not a botnet; it is **our own code** — a retry
+loop in the rating outbox, an E2E suite left pointed at `dev`, an agent-team run in a loop. L1
+catches that case too, and it is the case that will actually happen.
+
 ### L1 — stage and per-route throttling
 
 Add to `aws_apigatewayv2_stage.default`:
@@ -236,9 +259,32 @@ way to geo-filter an HTTP API at the gateway. The filter has to sit in front of 
 is the only in-front option that does not reintroduce a load balancer.
 
 CloudFront's always-free tier — 1 TB egress, 10M requests, 2M CloudFront Functions invocations per
-month — covers this stage completely, and blocked requests never reach API Gateway, so they never
-become a $1.00/M call. It is the one layer here that reduces the gateway bill rather than the
-downstream bill.
+month, perpetual and not part of the credit-based Free Plan — covers normal `dev` traffic
+completely. At rest this option is **$0**.
+
+**Under load it is worse than doing nothing, and this is decisive.** CloudFront charges
+**$0.0120 per 10,000 HTTPS requests in Europe — $1.20/M**, against API Gateway's $1.00/M. A request
+rejected at the edge by a geo rule is billed exactly like one that passes. So beyond the 10M/month
+free allowance (3.86 rps sustained — a flood exhausts it in minutes), geo-blocking *costs 20% more
+per request than letting the request through to API Gateway*, and traffic that passes the filter
+pays both meters.
+
+| Monthly requests | API Gateway alone | + CloudFront geo-block |
+|---|---:|---:|
+| 1M (real `dev` traffic) | $1.00 | **$0** (free tier) |
+| 100M | $100 | $208 |
+| 3,000M (100M/day flood) | $3,000 | $6,588 |
+
+CloudFront in front of the API is therefore a **surface-reduction measure, not a cost control.** It
+is worth having if the goal is "strangers should not be able to reach my dev stage at all"; it is
+counterproductive if the goal is "cap the bill". The layer that caps the bill is L1, and L1 makes
+the third row of that table unreachable anyway.
+
+Where CloudFront *does* pay for itself is the other exposure entirely: the world-readable
+`processed/*` prefix in `s3.tf`. Origin-to-CloudFront transfer is free, edge egress is $0.085/GB
+against S3's $0.09/GB, and the first 1 TB/month is free — so fronting the **image bucket** is
+strictly cheaper than today, while fronting the **API** is strictly more expensive. If CloudFront
+is adopted at all, adopt it there first.
 
 ### Three ways to draw the boundary
 
@@ -293,8 +339,9 @@ Point 3 is the real cost of this option and the reason it is scoped to `dev` for
   cap (L2).
 * The panic Lambda is manually invocable, so it doubles as the "I am on holiday and something looks
   wrong" button, and its resume path is an ordinary `terraform apply`.
-* Geo-restriction is the only layer that reduces the *gateway* charge, and inside the CloudFront
-  free tier it is free.
+* Geo-restriction shrinks the reachable surface at $0 for normal traffic — but it is scoped as a
+  security measure, not a cost control, because CloudFront bills a geo-blocked request at $1.20/M
+  against API Gateway's $1.00/M.
 * None of this reopens ADR 0003: no load balancer, no REST API, no change to the Cloud Map
   integration.
 
