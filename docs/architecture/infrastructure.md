@@ -148,12 +148,12 @@ previous group's SG id (no CIDRs).
 
 **There is no load balancer.** TLS terminates at API Gateway's managed fleet, outside the VPC, so the
 VPC link ENIs take no public ingress at all — their security group only needs egress to the task. The
-ALB was retired to remove its ~$18/mo flat charge plus two per-AZ public IPv4 addresses; see
+ALB was retired to remove its ~\$18/mo flat charge plus two per-AZ public IPv4 addresses; see
 [ADR 0003](../architecture-decision-records/0003-always-on-production-cost-architecture.md).
 
 | Component | Resource | Notes |
 |---|---|---|
-| Network | VPC `10.0.0.0/16`, 2 public + 2 private subnets, **no NAT** | Task runs in the **public** subnets with a public IP (pulls the GHCR image and reaches Supabase / GCP / SSM via the IGW); RDS is private-only. ~$33/mo saved vs NAT. |
+| Network | VPC `10.0.0.0/16`, 2 public + 2 private subnets, **no NAT** | Task runs in the **public** subnets with a public IP (pulls the GHCR image and reaches Supabase / GCP / SSM via the IGW); RDS is private-only. ~\$33/mo saved vs NAT. |
 | Ingress | API Gateway **HTTP API** + VPC Link v2 + Cloud Map + ACM cert + Route 53 A-alias | No hourly charge; billed per request. Uses the **`$default` stage** (a named stage prepends itself to the backend path and would break every route) and a **`$default` route** (`ANY /{proxy+}` does not match `/`, which is the health endpoint). Integration timeout **30 s, not increasable** — the server's own budget nests inside it (20 s Gemini call / 25 s handler). Access logs → `/aws/apigateway/breadsheet-dev-api`. |
 | Service discovery | Cloud Map private DNS namespace `breadsheet-dev.local`, service `server` | **SRV** records, TTL 15 — API Gateway's `DiscoverInstances` needs IP *and* port, and an A record carries no port. `health_check_custom_config` must be non-empty (`failure_threshold = 1`, deprecated but required) or AWS stores `null` and every plan re-replaces the service. |
 | Compute | ECS **Fargate** service `breadsheet-dev-server-service` on cluster `breadsheet-server-dev` | Desired 1, `256`/`512`, **X86_64** (image is `linux/amd64`), `assignPublicIp=ENABLED`, rolling deploy + circuit-breaker rollback. Liveness is a **container `healthCheck`** (`wget`, not `curl` — the `node:24-alpine` runtime image has no curl) with `startPeriod = 150` to cover `scripts/start.sh` running `npm run db:deploy` before the server listens. `health_check_grace_period_seconds` was ALB-only and went with it; without the target group, this health check is the *only* thing that detects a wedged task and the only signal ECS reports into Cloud Map. Memory is the 512 MB minimum, measured rather than assumed: it was briefly raised to 1 GB on the theory that sharp/libvips needed the headroom, but ADR 0003 step 0b measured `MemoryUtilization` peaking at ~124 MB (about 24% of 512) across 60 serial image uploads. 256 CPU permits only 512 / 1024 / 2048 MB. Revisit if uploads grow — the sample used 521 KB images against a 4 MB multer cap. |
@@ -321,7 +321,7 @@ cannot see. See
 [ADR 0005](../architecture-decision-records/0005-cost-blast-radius-and-emergency-stop.md) for the
 blast-radius analysis and the layered emergency stop it proposes — in short, a stage throttle
 (`default_route_settings`) is ~10 lines of HCL and bounds the AWS worst case, but only an in-process
-daily counter bounds the Gemini spend, because Vertex quotas are per-minute.
+daily counter bounds the Gemini spend, because Vertex quotas are per-minute. The ADR's consequence budget sets the caps at 2 rps and 30 Gemini calls/day, and puts the image bucket behind a CloudFront distribution on a **flat-rate Free plan** (no overage charges — the only structural cost ceiling on AWS), which together put the sustained-attack worst case at \$10.35/mo on top of the ~\$34/mo flat baseline.
 
 Note also that `FORECASTED >= 100%` needs several weeks of billing history before AWS will emit a
 forecast, so on a young account `ACTUAL >= 80%` is the only notification actually running.
@@ -475,7 +475,7 @@ task is the thing that is broken.
 
 For a GUI client instead (IntelliJ/DataGrip), the equivalent is an SSM-managed `t4g.nano` bastion
 plus `aws ssm start-session --document-name AWS-StartPortForwardingSessionToRemoteHost`. That is
-real Terraform and a standing ~$4/mo, which is why the one-off task is the default.
+real Terraform and a standing ~\$4/mo, which is why the one-off task is the default.
 
 ### Remote State (S3 backend)
 
@@ -530,11 +530,11 @@ s3://breadsheet-dev-s3-…/
 
 ### Pausing / Resuming the Dev Stack
 
-Dev has no NAT gateway (~$33/mo already avoided) and, since [ADR 0003](../architecture-decision-records/0003-always-on-production-cost-architecture.md),
-no load balancer either. The remaining always-on costs are the Fargate task (~$9/mo at
-`256`/`512`), RDS `db.t4g.micro` + storage (~$15/mo), one public IPv4 for task egress (~$3.65/mo),
-the two hosted zones (public + the Cloud Map private one, ~$1/mo) and the RDS master credential in
-Secrets Manager (~$0.40/mo). **The API Gateway ingress costs nothing at
+Dev has no NAT gateway (~\$33/mo already avoided) and, since [ADR 0003](../architecture-decision-records/0003-always-on-production-cost-architecture.md),
+no load balancer either. The remaining always-on costs are the Fargate task (~\$9/mo at
+`256`/`512`), RDS `db.t4g.micro` + storage (~\$15/mo), one public IPv4 for task egress (~\$3.65/mo),
+the two hosted zones (public + the Cloud Map private one, ~\$1/mo) and the RDS master credential in
+Secrets Manager (~\$0.40/mo). **The API Gateway ingress costs nothing at
 rest** — it is billed per request, so there is no longer an ingress tier to shed.
 
 **Tier 1 — CLI only, no Terraform changes (sheds the Fargate task + RDS compute):**
@@ -570,7 +570,7 @@ Caveats:
 
 **Tier 2 — retired.** This tier existed only to destroy the ALB, which no longer exists. Nothing in
 the API Gateway ingress bills hourly, so there is nothing to tear down between sessions: an idle
-HTTP API, VPC link and Cloud Map namespace cost approximately the private hosted zone's $0.50/mo and
+HTTP API, VPC link and Cloud Map namespace cost approximately the private hosted zone's \$0.50/mo and
 nothing else.
 
 > One thing the ingress *does* need while idle: a VPC link that carries no traffic for **60 days**
