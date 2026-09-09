@@ -314,6 +314,13 @@ Terraform cannot perform the confirmation, so such a resource sits permanently *
 and shows as drift on every plan. Note also `aws_sns_topic_policy` granting `budgets.amazonaws.com`
 publish rights — without it the budget applies cleanly and silently delivers nothing.
 
+**This is an alert, not a stop.** Nothing in `terraform/` currently halts spending — the stage sets
+no throttle (so the account default of 10,000 rps applies), API Gateway bills throttled 429s, and
+the largest per-unit cost (Gemini, via `PLAUSIBILITY_MODE=gemini`) is a *Google* charge this budget
+cannot see. See
+[ADR 0005](../architecture-decision-records/0005-cost-blast-radius-and-emergency-stop.md) for the
+blast-radius analysis and the layered emergency stop it proposes.
+
 ### VPC link keepalive
 
 `keepalive.tf` runs a 128 MB Lambda weekly (`rate(7 days)`) against `https://server.dev.bread-sheet.com/`.
