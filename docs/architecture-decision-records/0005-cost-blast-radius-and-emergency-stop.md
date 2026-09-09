@@ -674,8 +674,8 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 
 | # | Step | Where | Status |
 |---|---|---|---|
-| 0 | Confirm `aws_sns_topic.billing_alerts` has a confirmed email subscriber (`aws sns list-subscriptions-by-topic`) | console/CLI | ☐ |
-| 1 | **L-1** — `requireRegistered` on `POST /api/products/upload-image`; update the route test and `backend.md` § endpoints | `server/` | ☐ |
+| 0 | Confirm `aws_sns_topic.billing_alerts` has a confirmed email subscriber (`aws sns list-subscriptions-by-topic`) | console/CLI | ✅ (confirmed `breadsheet@pm.me`) |
+| 1 | **L-1** — `requireRegistered` on `POST /api/products/upload-image`; update the route test and `backend.md` § endpoints | `server/` | ✅ |
 | 2 | **Measure and set `thinkingConfig`** on both Gemini call sites; re-run `npm run measure:gemini` locally (ADR 0003 showed local predicts `dev`) and record \$/call. Decides L2's final cap | `server/` | ☐ |
 | 3 | **L1** — `default_route_settings` 5 rps / burst 25; explicit upload route at 1 rps / burst 5, with the "exists to be throttled" comment | `terraform/api-gateway.tf` | ☐ |
 | 4 | **D** — Cost Anomaly monitor + subscription, API Gateway `Count` alarm, log metric filter + `GeminiCalls` alarm, all → `billing_alerts`; GCP budget with email thresholds | `terraform/`, GCP console | ☐ |
