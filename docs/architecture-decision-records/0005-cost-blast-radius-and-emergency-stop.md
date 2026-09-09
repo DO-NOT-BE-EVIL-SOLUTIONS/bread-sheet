@@ -555,6 +555,68 @@ for "L2 has been bypassed or misconfigured", not for normal L2 operation. On the
 `aws_budgets_budget_action` stopping the RDS instance at 150% of `budget_limit_usd`. Both are the
 "everything else failed and nobody was looking" tier.
 
+**Implemented (2026-09-09) as `terraform/l4.tf` (+ the Cloud Function source at
+`terraform/functions/billing-killswitch/`).**
+
+*AWS side.* `aws_budgets_budget_action.stop_rds` — `RUN_SSM_DOCUMENTS` / `STOP_RDS_INSTANCES` against
+`aws_db_instance.main`, `AUTOMATIC` approval, threshold 150% of `budget_limit_usd`. The execution
+role attaches AWS's own managed policy for exactly this
+(`AWSBudgetsActions_RolePolicyForResourceAdministrationWithSSM` — EC2/RDS start-stop conditioned on
+`aws:CalledVia = ssm.amazonaws.com`, plus `ssm:StartAutomationExecution` scoped to the four AWS-owned
+`AWS-{Start,Stop}{EC2,Rds}Instance` documents) rather than a hand-written policy — AWS documents the
+exact JSON at `docs.aws.amazon.com/cost-management/.../billing-permissions-ref.html#budget-managedIAM-SSM`,
+which is worth trusting over a guess here.
+
+*GCP side.* `google_billing_budget.dev` (detection.tf) gained a fourth `threshold_rules` block at
+`threshold_percent = 1.0` and an `all_updates_rule { pubsub_topic = ... }` — the same budget resource
+D already uses, extended rather than duplicated, so there is exactly one €40 number to reason about.
+Every notification (D's fractional thresholds too, several times a day per Google's own docs) lands
+on the same Pub/Sub topic; `index.js` is what turns that stream into a single one-shot action — it
+no-ops unless `costAmount > budgetAmount`, then calls `cloudbilling.projects.updateBillingInfo` with
+an empty `billingAccountName`.
+
+Three corrections the plan above didn't anticipate, all found by actually applying this rather than
+just writing it:
+
+* **Terraform has no `google_pricingplanmanager`-style gap here, but the deploy region does bite.**
+  `var.gcp_location` is `"global"` in `dev.tfvars` — correct for Vertex AI model routing (see the
+  `GOOGLE_CLOUD_LOCATION` fix in `infrastructure.md`), but not a real region for GCS, Cloud Functions,
+  or Eventarc, all of which rejected it outright (`may not create storageClass STANDARD buckets with
+  locationConstraint GLOBAL`). The function's resources use their own region (`europe-west1`),
+  independent of Vertex's location choice — the two are unrelated despite sharing a variable name in
+  spirit.
+* **A recently-changed GCP org policy no longer auto-grants the default Compute Engine SA the role
+  Cloud Build needs for gen2 function builds.** The first deploy attempt failed with "missing
+  permission on the build service account." Rather than widening the shared default compute SA (used
+  project-wide for unrelated things), `build_config.service_account` points at the killswitch SA
+  itself, granted `roles/cloudbuild.builds.builder` — one purpose-built identity for build, trigger,
+  and (once billing.admin is exercised for real) the detach call.
+* **A gen2 Pub/Sub trigger on a non-default service account needs three IAM grants, not one**, or it
+  deploys cleanly and silently never delivers: `roles/eventarc.eventReceiver` (project) so the trigger
+  identity can receive events, `roles/run.invoker` on the function's own underlying Cloud Run service
+  (not project-wide) so the Pub/Sub push subscription can actually invoke it, and
+  `roles/iam.serviceAccountTokenCreator` granted **to the killswitch SA, held by the Pub/Sub service
+  agent** (`service-<project-number>@gcp-sa-pubsub.iam.gserviceaccount.com`) so Pub/Sub can mint the
+  identity tokens push delivery needs. Missing any one of these produces `run.routes.invoke` 401s that
+  never surface as a Terraform error — the resources all apply cleanly regardless.
+
+**Verified without ever exercising the real detach path.** Two synthetic Pub/Sub messages
+(`costAmount` 1.23 and 2.5 against `budgetAmount` 40) were published directly to the topic after
+apply; function logs show both received, parsed, and correctly resolved to "under budget, no action"
+— confirming the whole chain (Pub/Sub → Eventarc → Cloud Run → function logic) end-to-end without
+ever calling `updateBillingInfo`. The one grant this whole layer turns on —
+`google_billing_account_iam_member.killswitch_admin`, `roles/billing.admin` for the killswitch SA on
+the real billing account — was never invoked in anger, deliberately: there is no safe way to test the
+actual detach without detaching real billing.
+
+**What this does *not* do: reverse itself.** A real trip leaves the project with no billing account
+attached — every Google service stops, including Vertex/Gemini — until someone manually re-attaches
+one (`gcloud billing projects link <project> --billing-account=<id>`, or the console). `terraform
+apply` does not undo this: `google_project_service` resources for a de-billed project would fail to
+reconcile, and nothing in this stack automates re-attachment. That is intentional — the entire point
+of L4 is to be a hard stop a human has to consciously reverse, not a soft one Terraform quietly
+smooths over.
+
 ---
 
 ### L5 — CloudFront flat-rate Free plan over the image bucket
@@ -780,7 +842,7 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 | 4 | **D** — Cost Anomaly monitor + subscription, API Gateway `Count` alarm, log metric filter + `GeminiCalls` alarm, all → `billing_alerts`; GCP budget with email thresholds | `terraform/`, GCP console | ✅ |
 | 5 | **L2** — `GeminiDailyUsage` Prisma model + migration, reservation function beside `geminiDeadline.ts`, `GEMINI_DAILY_CALL_CAP` in `config.ts` (fail-fast, validated integer), `503 daily_quota_exhausted`, tests incl. concurrency and fail-closed; `CLAUDE.md` env-var block, `backend.md`, Bruno docs for the new 503 | `server/` | ✅ |
 | 6 | **L5** — distribution + OAC + WAF ACL + Free plan subscription; remove `PublicReadAllowProcessed`; `ASSET_BASE_URL` → distribution domain (task env var: forced replacement); fix `rds.tf` to use `var.db_max_allocated_storage` while in the file | `terraform/`, `infrastructure.md` | ✅ applied (distribution live, verified end-to-end); ✅ Free plan console step |
-| 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `terraform/budget.tf` | ☐ |
+| 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `terraform/l4.tf` | ✅ applied; wiring verified with synthetic under-budget messages (real detach path deliberately never exercised) |
 | 8 | Raise `GEMINI_DAILY_CALL_CAP` on `dev` to 300 once step 2 confirms ~\$0.0036/call | task env | ☐ |
 | P2 | **Phase 2** — API distribution on Free plan 2: WAF geo `DE` + rate rule + header insertion secret, `disable_execute_api_endpoint`, `us-east-1` cert, DNS alias; CI allow path | `terraform/`, `server/app.ts`, `.github/workflows/test-native-e2e.yml` | after Phase 1 |
 

@@ -1,0 +1,13 @@
+{
+  "name": "billing-killswitch",
+  "version": "1.0.0",
+  "description": "ADR 0005 L4 - detaches Cloud Billing from the project when a budget notification reports costAmount > budgetAmount.",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^5.0.5",
+    "googleapis": "^178.1.1"
+  }
+}
