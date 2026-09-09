@@ -52,7 +52,14 @@ resource "aws_ecs_task_definition" "server" {
     # push-deployed revisions are invisible to Terraform, so this pin drifts behind the live
     # service. It is the image the stack comes back on after a Tier 3 pause; re-point it at the
     # running revision before resuming (see infrastructure.md § Pausing / Resuming the Dev Stack).
-    image     = "ghcr.io/fabelhaft-io/bread-sheet-server:25f6411ca2bdbadda59761d0e51a30e11dddef80"
+    #
+    # THE SAME APPLIES TO ANY `-replace` OF THIS RESOURCE, not just a pause/resume: update this
+    # pin to match the currently-live image FIRST. ADR 0005 L5 rollout (2026-09-09) skipped that
+    # and silently redeployed a stale, older commit — every launched task then crashed in
+    # scripts/start.sh's `prisma migrate deploy` (P1013: invalid port number in the RDS IAM token
+    # URL), and ECS's circuit breaker rolled back each time. The service never went down, but the
+    # new env vars in this apply didn't land until the pin was corrected and `-replace` re-run.
+    image     = "ghcr.io/fabelhaft-io/bread-sheet-server:04c6a55df0dfde789b0482c7f62bd10faa06d81b"
     essential = true
 
     portMappings = [{
@@ -87,7 +94,12 @@ resource "aws_ecs_task_definition" "server" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "S3_MODE", value = "aws" },
       { name = "S3_BUCKET_NAME", value = var.s3_bucket_name },
-      { name = "ASSET_BASE_URL", value = "https://${var.s3_bucket_name}.s3.eu-west-1.amazonaws.com" },
+      # ADR 0005 L5: images are served through the CloudFront distribution
+      # (cloudfront.tf), not directly from S3 — the bucket policy now only
+      # allows reads from that distribution's OAC identity, so a stale
+      # bucket URL here would 403 every image. Forced-replacement task env
+      # var (infrastructure.md § Changing a task environment variable).
+      { name = "ASSET_BASE_URL", value = "https://${aws_cloudfront_distribution.images.domain_name}" },
       { name = "VISION_MODE", value = "llm" },
       { name = "PLAUSIBILITY_MODE", value = "gemini" },
       # ADR 0005 L2. config.ts requires this whenever VISION_MODE=llm or
