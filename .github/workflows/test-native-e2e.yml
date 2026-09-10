@@ -157,11 +157,9 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY }}
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
-          # ADR 0005 Phase 2: dev's CloudFront distribution geo-restricts to Germany;
+          # DEV's CloudFront distribution geo-restricts to Germany;
           # GitHub-hosted runners aren't. Sent as X-Edge-Bypass (lib/api.ts), matched
-          # by the WAF's "edge-bypass" rule (terraform/phase2.tf) ahead of the geo
-          # check. A *secret*, not a repo variable, deliberately — and set only in
-          # this job, never in build-apk.yml's release build.
+          # by the WAF's "edge-bypass" rule
           EXPO_PUBLIC_EDGE_BYPASS_SECRET: ${{ secrets.EDGE_BYPASS_SECRET }}
 
       # Screenshots and per-step view hierarchies live in Maestro's own run directory, not in

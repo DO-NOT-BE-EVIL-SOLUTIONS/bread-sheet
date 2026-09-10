@@ -78,8 +78,6 @@ describe('api', () => {
     }
   });
 
-  // ADR 0005 Phase 2: EXPO_PUBLIC_EDGE_BYPASS_SECRET is read once at module
-  // load, so exercising both branches needs a fresh module instance per case.
   it('does not send X-Edge-Bypass when EXPO_PUBLIC_EDGE_BYPASS_SECRET is unset', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,

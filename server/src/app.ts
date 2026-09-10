@@ -13,18 +13,16 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:8081')
 
 const app = express();
 
-// Two proxy hops in front of Express as of ADR 0005 Phase 2: CloudFront
-// (terraform/phase2.tf) adds the viewer's IP to X-Forwarded-For when it
-// forwards to the API Gateway custom origin, and API Gateway/the VPC link
-// contribute the second (the VPC link itself is just ENIs and adds no hop of
-// its own — this "1" is the same one ADR 0003 already relied on when the ALB
+// Two proxy hops in front of Express when it forwards to the API Gateway custom origin,
+// and API Gateway/the VPC link contribute the second (VPC link itself is just ENIs and
+// adds no hop of its own — this "1" is the same one ADR 0003 already relied on when the ALB
 // was removed). `req.ip` must resolve to the real client, not CloudFront's
 // edge IP, or every client behind one edge location shares an
 // express-rate-limit bucket. `2`, not `true`: forged X-Forwarded-For headers
 // still can't be used to dodge limits. Bump only if another proxy is added.
 app.set('trust proxy', 2);
 
-// ADR 0005 Phase 2: 403s any /api/* request that didn't arrive through the
+// 403s any /api/* request that didn't arrive through the
 // CloudFront distribution in front of the API — see the middleware for what
 // that actually buys, given the API Gateway custom domain stays publicly
 // resolvable. Runs before anything else touches the request.

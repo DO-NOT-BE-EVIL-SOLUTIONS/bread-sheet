@@ -1,16 +1,3 @@
-# ──────────── ADR 0005 § D — Detection ────────────────────────────────────────
-#
-# None of this stops any spend — it bounds *how long* an unnoticed runaway
-# spends before a human sees it, which is the multiplier on every worst case in
-# the ADR. Four free signals, all fanning into the existing
-# aws_sns_topic.billing_alerts (budget.tf) so there is exactly one place to
-# manage subscribers.
-#
-# Precondition: the topic must have a *confirmed* email subscriber or none of
-# this delivers anywhere — verified out of band with
-# `aws sns list-subscriptions-by-topic --topic-arn <arn>` (ADR step 0, done
-# 2026-09-09: breadsheet@pm.me confirmed).
-
 # ──────────── AWS Cost Anomaly Detection ───────────────────────────────────────
 # Account-level monitor on AWS_SERVICES (a step change in any AWS line item,
 # including ones this ADR did not think of) — free. Cost Explorer's anomaly
@@ -41,10 +28,6 @@ resource "aws_ce_anomaly_subscription" "aws_services" {
   provider = aws.use1
 
   name = "${local.name_prefix}-aws-services"
-  # DAILY/WEEKLY only support an EMAIL subscriber (AWS rejects an SNS
-  # subscriber on those frequencies with a 400 ValidationException) — SNS
-  # requires IMMEDIATE, which suits this layer better anyway: D's latency
-  # budget is "minutes", not "up to a day".
   frequency = "IMMEDIATE"
 
   monitor_arn_list = [aws_ce_anomaly_monitor.aws_services.arn]
@@ -68,10 +51,6 @@ resource "aws_ce_anomaly_subscription" "aws_services" {
 }
 
 # ──────────── CloudWatch: API Gateway request flood ────────────────────────────
-# `Count` includes requests the stage throttled (api-gateway.tf L1), which is
-# the point — this alarm sees the flood, not just what got through. Threshold is
-# ~3.3 rps sustained: an order of magnitude above real traffic including a CI
-# run, far below anything that costs money.
 
 resource "aws_cloudwatch_metric_alarm" "api_gateway_flood" {
   alarm_name          = "${local.name_prefix}-apigw-request-flood"
@@ -131,14 +110,7 @@ resource "aws_cloudwatch_metric_alarm" "gemini_calls_high" {
 }
 
 # ──────────── GCP budget alert ──────────────────────────────────────────────────
-# The Google bill is invisible to every AWS control above. $40 mirrors L4's
-# hard-stop trigger (ADR step 7, l4.tf — the 100% threshold_rules block below
-# is what that layer fires on). Thresholds at $2/$5/$10 actual give a same-day
-# signal on a runaway long before the $32.40/mo L2 ceiling, let alone the $40
-# backstop. Email notification is untouched — GCP still emails the billing
-# account's IAM recipients (roles/billing.admin, i.e. breadsheet@pm.me) on
-# every threshold — the all_updates_rule below adds a second channel (Pub/Sub)
-# rather than replacing the first.
+# The Google bill is invisible to every AWS control above.
 
 resource "google_project_service" "billingbudgets" {
   project = var.gcp_project
@@ -164,7 +136,6 @@ resource "google_billing_budget" "dev" {
       # describe 01E7A9-4D7E3E-165061` → currencyCode: EUR) — the Budgets API
       # rejects a mismatched currency_code with a bare 400 "invalid argument"
       # and no field-level detail, which is what the first apply attempt hit.
-      # 40 EUR stands in for the ADR's $40 USD figure; not currency-converted.
       currency_code = "EUR"
       units         = "40"
     }
@@ -185,22 +156,13 @@ resource "google_billing_budget" "dev" {
     spend_basis       = "CURRENT_SPEND"
   }
 
-  # ADR 0005 L4 (l4.tf): the hard-stop trigger. Every other threshold above is
-  # "tell a person"; this one is "detach billing" — deliberately at 100% of
-  # the same €40/$40 budget the D thresholds are fractions of, not a separate
-  # number, so there is exactly one budget to reason about.
+  # This is "detach billing" — deliberately at 100%
   threshold_rules {
-    threshold_percent = 1.0 # €40 — L4's hard-stop trigger
+    threshold_percent = 1.0
     spend_basis       = "CURRENT_SPEND"
   }
 
-  # Second notification channel alongside the default email recipients (not a
-  # replacement — disable_default_iam_recipients is left at its default
-  # false). Every threshold above, not just the 100% one, publishes here; the
-  # Cloud Function (l4.tf) evaluates costAmount vs budgetAmount itself and is
-  # a no-op below 100%, per Google's own docs: budget notifications are sent
-  # "multiple times per day with the current status of your budget", not only
-  # on a crossing.
+  # Second notification channel alongside the default email recipients
   all_updates_rule {
     pubsub_topic = google_pubsub_topic.billing_killswitch.id
   }

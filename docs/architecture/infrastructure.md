@@ -430,7 +430,7 @@ aws ecs update-service --cluster breadsheet-server-dev \
 
 ### L4 backstops (ADR 0005)
 
-`terraform/l4.tf` — the "everything else failed and nobody was looking" tier, one hard stop per
+`../../terraform/backstops-budget.tf` — the "everything else failed and nobody was looking" tier, one hard stop per
 vendor. Applied and verified 2026-09-09.
 
 **AWS: stop RDS at 150% of budget.** `aws_budgets_budget_action.stop_rds` is a `RUN_SSM_DOCUMENTS`
@@ -454,7 +454,7 @@ Three things that only showed up when this was actually applied, not just writte
 
 * **`var.gcp_location` (`"global"`, for Vertex AI model routing) is not a real region.** GCS, Cloud
   Functions and Eventarc all rejected it outright. The function's resources use their own literal
-  region (`europe-west1`, `local.l4_function_region` in `l4.tf`) — unrelated to Vertex's location
+  region (`europe-west1`, `local.l4_function_region` in `backstops-budget.tf`) — unrelated to Vertex's location
   choice despite the shared variable in spirit.
 * **A GCP org-policy change means the default Compute Engine SA no longer auto-gets the role Cloud
   Build needs for gen2 function builds.** First apply failed with "missing permission on the build
@@ -493,7 +493,7 @@ Terraform quietly smooth it over.
 
 ### Phase 2 — CloudFront over the API (ADR 0005)
 
-`terraform/phase2.tf` fronts the API with a second CloudFront distribution (the account's second Free
+`../../terraform/dev-geo-restriction.tf` fronts the API with a second CloudFront distribution (the account's second Free
 plan slot; L5's images distribution used the first) for two things a plain HTTP API cannot provide:
 per-IP rate limiting and geo-restriction, both enforced at the edge for \$0. Applied and largely
 verified 2026-09-09 — see the caveat at the end of this section on what still needs a deploy.
@@ -544,7 +544,7 @@ location would share an `express-rate-limit` bucket as CloudFront's own edge IP.
 **Two things found only by applying this, not by writing it:**
 
 * **ACM certificate tags reject parentheses and commas** — same class of validation-regex surprise as
-  the WAF ACL description in `l4.tf` (`docs/architecture-decision-records/0005-...md` § L4 has the
+  the WAF ACL description in `backstops-budget.tf` (`docs/architecture-decision-records/0005-...md` § L4 has the
   exact regex), different resource. A `Name` tag reading `"... (CloudFront, us-east-1)"` failed
   `RequestCertificate` outright.
 * **That failure landed mid-cutover and broke the live DNS record for several minutes.** The apply

@@ -1,19 +1,8 @@
-# ──────────── ADR 0005 § L5 — CloudFront flat-rate Free plan over the image bucket ────
+# ──────────── CloudFront flat-rate Free plan over the image bucket ────
 
-# s3.tf's old PublicReadAllowProcessed statement let image egress bypass every
-# limiter in this stack (the gateway throttle, the app, auth — all of it) at
-# $0.09/GB with no ceiling. This distribution, subscribed to CloudFront's
-# flat-rate Free plan, replaces that with a structural $0: there is no
-# per-request or per-GB meter to run at all, only a monthly usage allowance
-# that (per AWS's own docs) degrades delivery rather than billing if exceeded.
-#
-# Terraform cannot subscribe a distribution to a flat-rate plan — confirmed
-# against both the installed aws provider's schema (no `pricing_plan`
-# argument on aws_cloudfront_distribution, no aws_pricingplanmanager_*
-# resource in ~> 6.39) and AWS's docs, which say plan management is
-# console / AWS CLI / PricingPlanManager-API only, not part of the CloudFront
-# API this provider wraps. Terraform creates and wires everything the plan
-# requires (OAC, an attached WAF Web ACL — mandatory, cannot be detached
+# Terraform cannot subscribe a distribution to a flat-rate plan.
+# Terraform creates and wires everything the plan requires
+# (OAC, an attached WAF Web ACL — mandatory, cannot be detached
 # without reverting to pay-as-you-go); subscribing the resulting distribution
 # to the Free plan is the one manual step left, same shape as the SNS email
 # confirmation in detection.tf:

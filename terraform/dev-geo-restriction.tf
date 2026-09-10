@@ -1,4 +1,4 @@
-# ──────────── ADR 0005 § Phase 2 — CloudFront over the API ────────────────────
+# ──────────── CloudFront over the API ────────────────────
 #
 # `server.dev.bread-sheet.com` moves from an alias straight at API Gateway to
 # an alias at this distribution — a second flat-rate Free plan (L5's images
@@ -41,7 +41,7 @@ resource "aws_ssm_parameter" "origin_verify_secret" {
   tags = merge(local.tags, { Name = "/breadsheet/dev/ORIGIN_VERIFY_SECRET" })
 }
 
-# ──────────── WAF Web ACL (CLOUDFRONT scope → us-east-1, same as l4.tf) ────────
+# ──────────── WAF Web ACL (CLOUDFRONT scope → us-east-1, same as backstops-budget.tf) ────────
 
 resource "aws_wafv2_web_acl" "api" {
   provider = aws.use1

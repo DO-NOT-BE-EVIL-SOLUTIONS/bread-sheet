@@ -556,7 +556,7 @@ for "L2 has been bypassed or misconfigured", not for normal L2 operation. On the
 `aws_budgets_budget_action` stopping the RDS instance at 150% of `budget_limit_usd`. Both are the
 "everything else failed and nobody was looking" tier.
 
-**Implemented (2026-09-09) as `terraform/l4.tf` (+ the Cloud Function source at
+**Implemented (2026-09-09) as `../../terraform/backstops-budget.tf` (+ the Cloud Function source at
 `terraform/functions/billing-killswitch/`).**
 
 *AWS side.* `aws_budgets_budget_action.stop_rds` — `RUN_SSM_DOCUMENTS` / `STOP_RDS_INSTANCES` against
@@ -830,7 +830,7 @@ directly. Three things, all mandatory together:
 **Plan budget:** L5 uses Free plan 1 of 3, this uses 2 of 3. Each covers one distribution with one
 apex domain; both sit under `bread-sheet.com`, one apex per plan, which the quota permits.
 
-**Implemented (2026-09-09) as `terraform/phase2.tf` (+ `dns.tf`, `api-gateway.tf`, `keepalive.tf`
+**Implemented (2026-09-09) as `../../terraform/dev-geo-restriction.tf` (+ `dns.tf`, `api-gateway.tf`, `keepalive.tf`
 edits; `server/src/middlewares/requireOriginSecret.ts`; `bread-sheet-app/lib/api.ts`;
 `.github/workflows/test-native-e2e.yml`).**
 
@@ -845,7 +845,7 @@ end: the site works over the new domain, the edge-bypass header matches its rule
 **Two corrections found by applying it:**
 
 * **AWS's ACM tag-value regex doesn't allow parentheses or commas** — the same character-set lesson
-  as the WAF ACL description in `l4.tf`'s "Applied" note, different resource, different regex
+  as the WAF ACL description in `backstops-budget.tf`'s "Applied" note, different resource, different regex
   (`([\p{L}\p{Z}\p{N}_.:/=+\-@]*)`). A descriptive `Name` tag with `(CloudFront, us-east-1)` in it
   failed `RequestCertificate` outright.
 * **That failure landed mid-cutover and broke the live DNS record.** The apply had already destroyed
@@ -881,7 +881,7 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 | 4 | **D** — Cost Anomaly monitor + subscription, API Gateway `Count` alarm, log metric filter + `GeminiCalls` alarm, all → `billing_alerts`; GCP budget with email thresholds | `terraform/`, GCP console | ✅ |
 | 5 | **L2** — `GeminiDailyUsage` Prisma model + migration, reservation function beside `geminiDeadline.ts`, `GEMINI_DAILY_CALL_CAP` in `config.ts` (fail-fast, validated integer), `503 daily_quota_exhausted`, tests incl. concurrency and fail-closed; `CLAUDE.md` env-var block, `backend.md`, Bruno docs for the new 503 | `server/` | ✅ |
 | 6 | **L5** — distribution + OAC + WAF ACL + Free plan subscription; remove `PublicReadAllowProcessed`; `ASSET_BASE_URL` → distribution domain (task env var: forced replacement); fix `rds.tf` to use `var.db_max_allocated_storage` while in the file | `terraform/`, `infrastructure.md` | ✅ applied (distribution live, verified end-to-end); ✅ Free plan console step |
-| 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `terraform/l4.tf` | ✅ applied; wiring verified with synthetic under-budget messages (real detach path deliberately never exercised) |
+| 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `../../terraform/backstops-budget.tf` | ✅ applied; wiring verified with synthetic under-budget messages (real detach path deliberately never exercised) |
 | 8 | Raise `GEMINI_DAILY_CALL_CAP` on `dev` to 300 once step 2 confirms ~\$0.0036/call | task env | ✅ |
 | P2 | **Phase 2** — API distribution on Free plan 2: WAF geo `DE` + rate rule + header insertion secret, `disable_execute_api_endpoint`, `us-east-1` cert, DNS alias; CI allow path | `terraform/`, `server/app.ts`, `.github/workflows/test-native-e2e.yml` | ✅ infra applied and verified; ☐ Free plan console step; ☐ `ORIGIN_VERIFY_SECRET` enforcement live on `dev` (pending merge to `main` + image build); ☐ `EDGE_BYPASS_SECRET` copied to GitHub |
 

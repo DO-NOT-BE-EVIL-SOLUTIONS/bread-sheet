@@ -28,12 +28,6 @@ resource "aws_sns_topic" "billing_alerts" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-billing-alerts" })
 }
 
-# Every publisher below is an AWS service principal, so each needs explicit
-# publish rights on the topic — without this a resource applies cleanly but
-# silently never delivers. This one policy document is the single access
-# control point for the topic; ADR 0005's detection layer (detection.tf) adds
-# publishers here rather than attempting a second aws_sns_topic_policy (SNS
-# allows only one policy per topic).
 data "aws_iam_policy_document" "billing_alerts" {
   statement {
     sid     = "AllowBudgetsToPublish"
@@ -55,7 +49,6 @@ data "aws_iam_policy_document" "billing_alerts" {
     }
   }
 
-  # ADR 0005 D: AWS Cost Anomaly Detection subscription (detection.tf).
   statement {
     sid     = "AllowCostAnomalyDetectionToPublish"
     effect  = "Allow"
@@ -75,10 +68,6 @@ data "aws_iam_policy_document" "billing_alerts" {
     }
   }
 
-  # ADR 0005 D: the API Gateway flood alarm and the GeminiCalls log-metric alarm
-  # (detection.tf). Unlike Budgets, the CloudWatch console normally adds this
-  # statement for you on first use of an existing topic — Terraform must do it
-  # explicitly, or the alarms apply cleanly and never notify anyone.
   statement {
     sid     = "AllowCloudWatchAlarmsToPublish"
     effect  = "Allow"
@@ -111,9 +100,6 @@ resource "aws_budgets_budget" "monthly" {
   limit_amount = var.budget_limit_usd
   limit_unit   = "USD"
 
-  # Budgets include tax by default, which is right here: the ~19% VAT is real
-  # money and the ADR's targets are quoted inclusive of it.
-
   notification {
     comparison_operator       = "GREATER_THAN"
     threshold                 = 80
@@ -122,8 +108,6 @@ resource "aws_budgets_budget" "monthly" {
     subscriber_sns_topic_arns = [aws_sns_topic.billing_alerts.arn]
   }
 
-  # The one that matters for per-request pricing: it fires mid-month on a trend,
-  # before the money is spent, rather than after the fact.
   notification {
     comparison_operator       = "GREATER_THAN"
     threshold                 = 100
