@@ -97,14 +97,7 @@ interface Config {
   s3BucketName: string;
   assetBaseUrl: string;
   appDeepLinkScheme: string;
-  // Daily cap on Gemini calls (ADR 0005 L2). Only required when a Gemini call
-  // site can actually run (see `geminiNeeded` below); `null` otherwise so mock
-  // stages never need the var. `services/geminiQuota.ts` enforces it.
   geminiDailyCallCap: number | null;
-  // ADR 0005 Phase 2. `null` is a legitimate "off" state (local dev, tests,
-  // any stage with no CloudFront in front) — unlike this file's other vars,
-  // there is nothing to fail fast on here. `middlewares/requireOriginSecret.ts`
-  // is a no-op when this is null and enforces it otherwise.
   originVerifySecret: string | null;
 }
 
@@ -113,10 +106,7 @@ const plausibilityMode = readPlausibilityMode();
 const s3Mode = readS3Mode();
 
 // Gemini is used both for `llm` vision extraction and for `gemini` plausibility.
-// Either one being active requires credentials, chosen by environment (see
-// services/geminiClient.ts): Vertex AI via ADC/Workload Identity Federation when
-// GOOGLE_GENAI_USE_VERTEXAI=true (keyless, used in prod), otherwise the Gemini
-// Developer API with GEMINI_API_KEY (the local default).
+// Either one being active requires credentials, chosen by environment
 const geminiNeeded = visionMode === 'llm' || plausibilityMode === 'gemini';
 if (geminiNeeded) {
   if (process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true') {
@@ -134,8 +124,6 @@ if (geminiNeeded) {
   }
 }
 
-// ADR 0005 L2: no default anywhere, including for the cap value itself — a
-// misconfigured var must fail startup, not silently admit unlimited calls.
 function readGeminiDailyCallCap(required: boolean): number | null {
   const v = process.env.GEMINI_DAILY_CALL_CAP;
   if (!required && v === undefined) return null;

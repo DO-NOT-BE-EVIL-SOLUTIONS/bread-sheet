@@ -8,14 +8,8 @@ resource "aws_apigatewayv2_api" "main" {
   # makes API Gateway answer preflights itself and override the backend's
   # headers, which would silently stop ALLOWED_ORIGINS being the source of truth.
 
-  # ADR 0005 Phase 2: kills the raw `*.execute-api.eu-west-1.amazonaws.com` URL
-  # (previously public, previously the `api_endpoint` output). Without this,
-  # CloudFront/WAF (phase2.tf) is decorative — anyone who finds the execute-api
-  # URL reaches the API directly, geo-restriction and rate-limiting included,
-  # same lesson as OAC on the images bucket. Only the custom domain (now
-  # `origin.dev.bread-sheet.com`, dns.tf) answers, and only requests carrying
-  # the header the distribution's WAF inserts get past `requireOriginSecret`
-  # (server/src/app.ts) once they're there.
+  # Kills the raw public `*.execute-api.eu-west-1.amazonaws.com` URL
+  # to allow traffic only via CloudFront/WAF
   disable_execute_api_endpoint = true
 
   tags = local.tags
@@ -45,8 +39,7 @@ resource "aws_apigatewayv2_route" "proxy" {
   target    = "integrations/${aws_apigatewayv2_integration.server.id}"
 }
 
-# ADR 0005 L1: exists purely to be throttled. `route_settings` can only key a route
-# that exists, and the API otherwise runs a single `$default` catch-all — so this
+# Throttle `route_settings` via this, and the API otherwise runs a single `$default` catch-all — so this
 # route points at the exact same integration as `$default` (routing is unchanged)
 # and its only job is to give the Gemini upload path its own, tighter throttle
 # below. Do not remove it thinking it is dead code.
@@ -73,21 +66,11 @@ resource "aws_apigatewayv2_stage" "default" {
   name        = "$default"
   auto_deploy = true
 
-  # ADR 0005 L1. API Gateway bills on calls received regardless of whether the
-  # stage throttles them, so this is not a Gemini cost control — it bounds the
-  # otherwise-unbounded gateway + access-log charge (account default is 10,000
-  # rps). 5 rps is ~432,000 req/day, no constraint on one dev team; burst is 25,
-  # not 10, because the Maestro emulator and a developer's phone can both open
-  # the Home tab (several parallel requests) in the same second, and a 429 on a
-  # CI flow is a red PR that has nothing to do with the PR.
   default_route_settings {
     throttling_rate_limit  = 5
     throttling_burst_limit = 25
   }
 
-  # Tighter cap on the Gemini upload path specifically — a burst damper, not a
-  # day cap (a rate throttle can't express "per day", which is the shape the
-  # Gemini bill actually has; L2's daily counter is what bounds that spend).
   route_settings {
     route_key              = aws_apigatewayv2_route.upload_image.route_key
     throttling_rate_limit  = 1
@@ -132,9 +115,9 @@ resource "aws_apigatewayv2_api_mapping" "origin" {
 
 # ──────────── API Gateway Custom Domain ───────────────────────────────────────
 #
-# ADR 0005 Phase 2: renamed from "server" — this domain is now the internal
+# Renamed from "server" — this domain is now the internal
 # origin CloudFront calls, not the public name (that's the distribution's own
-# domain in phase2.tf, aliased from `server.dev.bread-sheet.com` in dns.tf).
+# domain in dev-geo-restriction.tf, aliased from `server.dev.bread-sheet.com` in dns.tf).
 moved {
   from = aws_apigatewayv2_domain_name.server
   to   = aws_apigatewayv2_domain_name.origin

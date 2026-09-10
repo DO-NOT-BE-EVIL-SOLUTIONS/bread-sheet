@@ -9,7 +9,7 @@ resource "aws_route53_zone" "dev" {
 
 # ──────────── ACM Certificate — API Gateway origin domain (regional) ──────────
 #
-# ADR 0005 Phase 2: `server.dev.bread-sheet.com` moves to the CloudFront
+# `server.dev.bread-sheet.com` moves to the CloudFront
 # distribution below; API Gateway's custom domain moves to this internal-facing
 # name instead. It stays *publicly resolvable* — CloudFront needs a real
 # hostname to reach over the internet as a custom origin, same reasoning as the
@@ -74,7 +74,7 @@ resource "aws_route53_record" "origin" {
 #
 # CloudFront only accepts ACM certificates issued in us-east-1, regardless of
 # where the distribution's origin lives — the same us-east-1-only constraint
-# detection.tf's Cost Anomaly monitor and l4.tf's CLOUDFRONT-scope WAF ACL hit,
+# detection.tf's Cost Anomaly monitor and backstops-budget.tf's CLOUDFRONT-scope WAF ACL hit,
 # reusing the same `aws.use1` provider alias from main.tf.
 
 resource "aws_acm_certificate" "cloudfront_server" {
@@ -105,10 +105,10 @@ resource "aws_acm_certificate_validation" "cloudfront_server" {
   validation_record_fqdns = [aws_route53_record.cloudfront_server_validation.fqdn]
 }
 
-# ──────────── A Record → CloudFront (ADR 0005 Phase 2 cutover) ────────────────
+# ──────────── A Record → CloudFront ────────────────
 #
 # Was an alias straight to the API Gateway custom domain; now aliases the
-# CloudFront distribution (phase2.tf) sitting in front of it. CloudFront's
+# CloudFront distribution (dev-geo-restriction.tf) sitting in front of it. CloudFront's
 # hosted zone ID is a single fixed value for every distribution on the
 # platform (Z2FDTNDATAQYW2) — AWS documents it as a constant, not something to
 # look up per-distribution.

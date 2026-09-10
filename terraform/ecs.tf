@@ -53,12 +53,6 @@ resource "aws_ecs_task_definition" "server" {
     # service. It is the image the stack comes back on after a Tier 3 pause; re-point it at the
     # running revision before resuming (see infrastructure.md § Pausing / Resuming the Dev Stack).
     #
-    # THE SAME APPLIES TO ANY `-replace` OF THIS RESOURCE, not just a pause/resume: update this
-    # pin to match the currently-live image FIRST. ADR 0005 L5 rollout (2026-09-09) skipped that
-    # and silently redeployed a stale, older commit — every launched task then crashed in
-    # scripts/start.sh's `prisma migrate deploy` (P1013: invalid port number in the RDS IAM token
-    # URL), and ECS's circuit breaker rolled back each time. The service never went down, but the
-    # new env vars in this apply didn't land until the pin was corrected and `-replace` re-run.
     image     = "ghcr.io/fabelhaft-io/bread-sheet-server:04c6a55df0dfde789b0482c7f62bd10faa06d81b"
     essential = true
 
@@ -94,19 +88,9 @@ resource "aws_ecs_task_definition" "server" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "S3_MODE", value = "aws" },
       { name = "S3_BUCKET_NAME", value = var.s3_bucket_name },
-      # ADR 0005 L5: images are served through the CloudFront distribution
-      # (cloudfront.tf), not directly from S3 — the bucket policy now only
-      # allows reads from that distribution's OAC identity, so a stale
-      # bucket URL here would 403 every image. Forced-replacement task env
-      # var (infrastructure.md § Changing a task environment variable).
       { name = "ASSET_BASE_URL", value = "https://${aws_cloudfront_distribution.images.domain_name}" },
       { name = "VISION_MODE", value = "llm" },
       { name = "PLAUSIBILITY_MODE", value = "gemini" },
-      # ADR 0005 L2. config.ts requires this whenever VISION_MODE=llm or
-      # PLAUSIBILITY_MODE=gemini (both true here) — omitting it crash-loops the
-      # task at boot, it does not fall back to unlimited. Raised from the 100
-      # interim value to 300 (ADR 0005 step 8) once step 2 confirmed the
-      # thinking-disabled cost at ~$0.0036/call, blended — 300/day ≈ $32/mo.
       { name = "GEMINI_DAILY_CALL_CAP", value = "300" },
       { name = "APP_DEEP_LINK_SCHEME", value = "breadsheet" },
       { name = "GOOGLE_GENAI_USE_VERTEXAI", value = "true" },
@@ -119,10 +103,6 @@ resource "aws_ecs_task_definition" "server" {
     secrets = [
       { name = "SUPABASE_URL", valueFrom = aws_ssm_parameter.supabase_url.arn },
       { name = "SUPABASE_PUBLISHABLE_DEFAULT_KEY", valueFrom = aws_ssm_parameter.supabase_key.arn },
-      # ADR 0005 Phase 2 (phase2.tf). requireOriginSecret (app.ts) checks this
-      # against X-Origin-Verify — the header the CloudFront WAF inserts on
-      # every request it allows. `secrets`, not `environment`: this one's a
-      # credential, not config, unlike GEMINI_DAILY_CALL_CAP above.
       { name = "ORIGIN_VERIFY_SECRET", valueFrom = aws_ssm_parameter.origin_verify_secret.arn },
     ]
 

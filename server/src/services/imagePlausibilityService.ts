@@ -113,9 +113,6 @@ async function checkGemini(
       config: {
         responseMimeType: 'application/json',
         responseSchema,
-        // ADR 0005 L2 sizing: a four-field classification doesn't need reasoning,
-        // and Gemini 3.x bills thinking tokens as output at the full rate — this
-        // is the ~3.5x cost difference the daily cap is set against.
         thinkingConfig: { thinkingBudget: 0 },
         abortSignal,
       },

@@ -1,18 +1,15 @@
-// ADR 0005 L4 — GCP billing kill switch.
-//
 // Triggered by the Pub/Sub topic attached to `google_billing_budget.dev`'s
 // `all_updates_rule` (detection.tf). Budget notifications are published
 // several times a day regardless of spend — this function is a no-op on
 // every one of them except the message that reports the account has
 // actually gone over budget, at which point it detaches Cloud Billing from
 // the project. That is the "everything else failed and nobody was looking"
-// backstop: L2 bounds Gemini spend day to day, D raises the alarm within the
-// hour, this is what fires if both of those were somehow bypassed.
+// backstop.
 //
 // Detaching billing stops every Google service in the project immediately
 // (Vertex/Gemini included) and is not something `terraform apply` undoes —
 // re-attaching a billing account is a manual console/CLI step. This is
-// deliberate: the point of L4 is to be a hard stop, not a soft one.
+// deliberate.
 const { google } = require('googleapis');
 const functions = require('@google-cloud/functions-framework');
 

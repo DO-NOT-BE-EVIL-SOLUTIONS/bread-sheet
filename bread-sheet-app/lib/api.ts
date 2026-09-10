@@ -45,13 +45,9 @@ async function authHeaders(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${session.access_token}` };
 }
 
-// ADR 0005 Phase 2: the CloudFront distribution in front of the API
-// geo-restricts to Germany. Set only in the Maestro CI workflow's env
-// (.github/workflows/test-native-e2e.yml) — never in the release APK build
-// (build-apk.yml doesn't set it) — so this stays undefined, and the header
-// omitted, in every build that actually ships. Matched against the WAF's
-// "edge-bypass" rule (terraform/phase2.tf); the same header, same secret,
-// also bypasses the VPC-link keepalive Lambda's requests (keepalive.tf).
+// Set only in the Maestro CI workflow's env (test-native-e2e.yml)
+// — never in the release APK build (build-apk.yml doesn't set it) —
+// Matched against the WAF's "edge-bypass" rule (terraform/dev-geo-restriction.tf)
 const EDGE_BYPASS_SECRET = process.env.EXPO_PUBLIC_EDGE_BYPASS_SECRET;
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

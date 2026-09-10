@@ -48,13 +48,10 @@ router.get('/:barcode', requireAuth, userLimiter, getProductByBarcode);
 // budget in ADR 0003 § step 0 — the inner half is `withGeminiDeadline` around
 // the model call itself. Both must stay comfortably below API Gateway's fixed
 // 30 s integration timeout, which answers with an opaque 504 and loses the
-// upload.
-//
-// requireRegistered (ADR 0005 L-1): the plausibility check on every upload runs a
+// upload. The plausibility check on every upload runs a
 // paid Gemini call before anything is persisted. Anonymous sessions can never turn
 // an upload into a product anyway (add-product.tsx turns guests away client-side
-// and POST /api/products is requireRegistered), so gating here is pure exposure
-// removal — it raises the cost of spamming this endpoint to "own a confirmed email".
+// and POST /api/products is requireRegistered).
 router.post(  '/upload-image',
   requireAuth,
   apiLimiter,

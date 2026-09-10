@@ -14,9 +14,8 @@ import app from './app.js';
 
 describe('trust proxy / express-rate-limit behind CloudFront + API Gateway', () => {
   it('trusts exactly two proxy hops so req.ip resolves to the forwarded client', () => {
-    // 2 = CloudFront (ADR 0005 Phase 2) + API Gateway/the VPC link (the VPC
-    // link is transparent — just ENIs — so this is the same "1" ADR 0003
-    // already relied on, plus CloudFront's new hop in front of it). `false`
+    // 2 = CloudFront + API Gateway/the VPC link (the VPC
+    // link is transparent — just ENIs `false`
     // would make every client behind one edge location share a rate-limit
     // key; `true` would trust spoofed X-Forwarded-For headers.
     expect(app.get('trust proxy')).toBe(2);

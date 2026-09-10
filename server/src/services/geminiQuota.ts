@@ -3,12 +3,6 @@ import logger from '../logger.js';
 import config from '../configs/config.js';
 import type { AppError } from '../middlewares/errorHandler.js';
 
-/**
- * Raised when today's `GEMINI_DAILY_CALL_CAP` has already been reserved, or
- * when the reservation itself could not be made (fail closed — ADR 0005 L2
- * rule 3: if the counter can't be read or written, the answer is 503, never
- * a model call).
- */
 export class GeminiDailyQuotaExhaustedError extends Error implements AppError {
   readonly status = 503;
   readonly code = 'daily_quota_exhausted';
@@ -19,24 +13,6 @@ export class GeminiDailyQuotaExhaustedError extends Error implements AppError {
   }
 }
 
-/**
- * Reserve one Gemini call against today's `GEMINI_DAILY_CALL_CAP`, atomically,
- * before the call is made. Both Gemini call sites (`imagePlausibilityService`,
- * `labelExtractionLlmService`) call this first and let a rejection propagate
- * instead of calling Gemini.
- *
- * Reserve-before-call, never count-after: incrementing first means concurrent
- * requests can't overshoot the cap by the width of the in-flight window, and a
- * call that times out or fails still counts — Google bills input tokens it has
- * already processed, so an aborted call is not a free one. The reservation is
- * never rolled back.
- *
- * The `WHERE calls < cap` guard on the conflict branch is what makes this a
- * single atomic statement rather than a check-then-increment race: Postgres
- * either performs the update and returns the row, or matches nothing and
- * returns no row, with no window for two concurrent requests to both read
- * "under cap" and both increment past it.
- */
 export async function reserveGeminiCall(operation: string): Promise<void> {
   const cap = config.geminiDailyCallCap;
   if (cap === null) {

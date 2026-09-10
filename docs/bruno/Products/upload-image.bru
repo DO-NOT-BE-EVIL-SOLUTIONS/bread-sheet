@@ -53,7 +53,7 @@ docs {
   Set the image field to a JPEG / PNG / WebP / GIF / TIFF / AVIF file (8 MB hard cap).
   Set kind to either 'product' or 'label'.
 
-  Requires a registered (non-anonymous) session (ADR 0005 L-1) — anonymous tokens get
+  Requires a registered (non-anonymous) session — anonymous tokens get
   403 { error: 'Registration required' } before the plausibility check runs, so a guest
   can never trigger the paid Gemini call. Use "Sign in with password" to get a
   registered accessToken; "Sign in anonymously" will 403 here.
