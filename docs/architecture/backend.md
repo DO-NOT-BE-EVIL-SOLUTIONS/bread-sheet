@@ -34,20 +34,32 @@ Applied in order in `app.ts`:
 
 | Order | Middleware | Scope | Purpose |
 |-------|-----------|-------|---------|
-| 1 | `requireOriginSecret` | `/api/*` | ADR 0005 Phase 2 — 403s any request lacking the `X-Origin-Verify` header the CloudFront distribution's WAF inserts. No-op when `ORIGIN_VERIFY_SECRET` is unset (local dev, tests, any stage with no CloudFront front end) |
-| 2 | `requestLogger` | global | Structured per-request log (`request:start` + `request:finish`) including method, path, status, duration, userId, isAnonymous, IP, and `x-request-id` |
-| 3 | `apiLimiter` | `POST /api/*` | 100 req / 15 min — broad API rate limit |
-| 4 | `authLimiter` | auth endpoints | 10 req / hr — tighter limit on auth routes |
-| 5 | `requireAuth` | protected routes | Validates Supabase Bearer JWT; injects `req.user` |
-| 6 | `requireRegistered` | contribution routes | Checks `is_anonymous !== true`; rejects guests with `403` |
-| 7 | `requireSelf(param)` | user-scoped routes | Compares `req.user.id` to route param; `403` on mismatch |
-| 8 | `requireGroupMember` | group routes | Verifies `GroupMember` record exists; `403` if not |
-| 9 | `requireGroupAdmin` | group admin routes | Same as above + asserts `role === 'ADMIN'` |
-| 10 | `requestDeadline()` | the two Gemini routes | 25 s handler deadline; `503 request_timeout` if nothing has responded by then |
-| 11 | Controllers | — | Handle request, call service, send response |
-| 12 | `errorHandler` | global | Two-channel sanitiser — full detail to logs, generic copy to client; returns early if the response already started |
+| 1 | `cors` | global | Origins from `ALLOWED_ORIGINS`, `credentials: true`. **Deliberately first** — see the note below the table |
+| 2 | `requireOriginSecret` | `/api/*` | ADR 0005 Phase 2 — 403s any request lacking the `X-Origin-Verify` header the CloudFront distribution sends as an origin `custom_header`. No-op when `ORIGIN_VERIFY_SECRET` is unset (local dev, tests, any stage with no CloudFront front end) |
+| 3 | `requestLogger` | global | Structured per-request log (`request:start` + `request:finish`) including method, path, status, duration, userId, isAnonymous, IP, and `x-request-id` |
+| 4 | `apiLimiter` | `POST /api/*` | 100 req / 15 min — broad API rate limit |
+| 5 | `authLimiter` | auth endpoints | 10 req / hr — tighter limit on auth routes |
+| 6 | `requireAuth` | protected routes | Validates Supabase Bearer JWT; injects `req.user` |
+| 7 | `requireRegistered` | contribution routes | Checks `is_anonymous !== true`; rejects guests with `403` |
+| 8 | `requireSelf(param)` | user-scoped routes | Compares `req.user.id` to route param; `403` on mismatch |
+| 9 | `requireGroupMember` | group routes | Verifies `GroupMember` record exists; `403` if not |
+| 10 | `requireGroupAdmin` | group admin routes | Same as above + asserts `role === 'ADMIN'` |
+| 11 | `requestDeadline()` | the two Gemini routes | 25 s handler deadline; `503 request_timeout` if nothing has responded by then |
+| 12 | Controllers | — | Handle request, call service, send response |
+| 13 | `errorHandler` | global | Two-channel sanitiser — full detail to logs, generic copy to client; returns early if the response already started |
 
-Authorization guards (7–9) are composable and applied at the **router layer**, not inside controllers.
+Authorization guards (8–10) are composable and applied at the **router layer**, not inside controllers.
+
+**Why `cors` is mounted first.** It only *adds* response headers, so its position grants no access — but
+every middleware below it can reject a request, and a rejection without `Access-Control-Allow-Origin` is
+opaque to a browser. `fetch` surfaces it as a bare `TypeError`, `bread-sheet-app/lib/api.ts` converts that
+to `NetworkError`, and `formatApiError` renders `OFFLINE_MESSAGE`. That is not a hypothetical: while
+`requireOriginSecret` sat above `cors`, the Phase 2 header mismatch returned `403` to *every* `/api/*`
+request and the web client reported "you appear to be offline" on every screen — the status code was
+never visible to it, while native (no CORS) showed the real `403`. Preflights are affected too: the
+browser sends no `X-Origin-Verify` on an `OPTIONS` request, so a gate above `cors` rejects the preflight
+and the real request is never attempted. Pinned by the `CORS runs ahead of the gates` block in
+`src/app.test.ts`, which fails if the order is swapped back.
 
 `app.ts` also sets `app.set('trust proxy', 2)` ahead of the stack (raised from `1` by ADR 0005 Phase 2). Two proxy hops sit in front of Express now: the **CloudFront distribution** (`../../terraform/dev-geo-restriction.tf`) adds the viewer's IP to `X-Forwarded-For` when it forwards to the API Gateway custom origin, and **API Gateway/the VPC Link** contribute the second — the VPC Link itself is just ENIs in the VPC and adds no hop of its own, so this "1" is the same one ADR 0003 already relied on when the ALB was removed, now with CloudFront's own hop added in front of it. Trusting both hops makes `req.ip` resolve to the actual client rather than CloudFront's edge IP, so the IP-keyed limiters (`apiLimiter`, `syncLimiter`) throttle per client rather than per edge location, and avoids `express-rate-limit`'s `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` error. The value is `2` (not `true`) so forged `X-Forwarded-For` headers can't be used to dodge limits; bump it only if another proxy is added in front of CloudFront.
 

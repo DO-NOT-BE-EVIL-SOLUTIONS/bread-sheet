@@ -508,9 +508,9 @@ resolvability harmless.
 **The WAF (`aws_wafv2_web_acl.api`, `us-east-1`) evaluates three rules in order, then a default
 allow:**
 
-1. `edge-bypass` (priority 0) — matches `X-Edge-Bypass` against a Terraform-generated secret; allows
-   and inserts the origin-secret header. For consumers that legitimately aren't in Germany: CI
-   (GitHub-hosted Maestro runners) and the VPC-link keepalive Lambda, both of which now send it.
+1. `edge-bypass` (priority 0) — matches `X-Edge-Bypass` against a Terraform-generated secret and
+   allows. For consumers that legitimately aren't in Germany: CI (GitHub-hosted Maestro runners) and
+   the VPC-link keepalive Lambda, both of which now send it.
 2. `geo-de-only` (priority 1) — blocks anything not geolocated to `DE`. **Country-level only, never
    `DE-BW`** — German mobile carriers route subscriber traffic through central egress points, so
    subdivision geolocation fails for real devices on real networks (see the ADR's "The accuracy
@@ -521,8 +521,23 @@ allow:**
 3. `rate-limit` (priority 2) — blocks at `> 1000` requests / 5 min per IP, the exact threshold
    `detection.tf`'s API Gateway flood alarm already uses, deliberately, so "too many requests" means
    one thing across the stack.
-4. Default action: allow, and insert `X-Origin-Verify` with the same secret the edge-bypass rule
-   inserts — this is the header `requireOriginSecret` checks for.
+4. Default action: allow. **No WAF rule inserts a header** — see below.
+
+**The origin-secret header is sent by the distribution, not the WAF.** `custom_header` on the
+`origin` block sets `X-Origin-Verify` on every request CloudFront forwards. It was originally a WAF
+`insert_header` on the default action and on `edge-bypass`, which silently never worked: **AWS WAF
+prefixes every header it inserts with `x-amzn-waf-`**, so Express received
+`x-amzn-waf-x-origin-verify` while `requireOriginSecret` checked `x-origin-verify`. Three reasons the
+distribution is the better home for it regardless of the prefix:
+
+* It lands on **every** forwarded request, whichever rule allowed it. With WAF insertion, each
+  terminating `allow` rule needs its own `custom_request_handling` block, and a future rule that
+  forgets one silently 403s that traffic.
+* The Terraform literal and the server literal are then identical and greppable from each other.
+* It is the pattern AWS documents for this job ("Controlling access to content" in *Add custom headers
+  to origin requests*). CloudFront **overwrites** a viewer-sent header of the same name before
+  forwarding, so it cannot be spoofed through the distribution; a request straight to
+  `origin.dev.bread-sheet.com` can send the name but not the 32-character value.
 
 **Origin request policy: `Managed-AllViewerExceptHostHeader`, not `Managed-AllViewer`.** AWS's own
 docs call out API Gateway origins by name here — they expect the `Host` header to carry the origin's
@@ -532,7 +547,9 @@ is fully disabled (`Managed-CachingDisabled`) — this is a dynamic API, not sta
 images distribution.
 
 **`server/src/middlewares/requireOriginSecret.ts`** 403s any `/api/*` request lacking a correct
-`X-Origin-Verify` header. It is a no-op when `ORIGIN_VERIFY_SECRET` is unset — deliberately, unlike
+`X-Origin-Verify` header. It is mounted **below** `cors` in `app.ts` — deliberately, and see
+`backend.md` § Middleware Stack for why: a 403 with no `Access-Control-Allow-Origin` is invisible to a
+browser, which reports it as *offline* rather than as a 403. It is a no-op when `ORIGIN_VERIFY_SECRET` is unset — deliberately, unlike
 this codebase's fail-fast convention for other config: local dev and any stage without a CloudFront
 front end have nothing to check against, and that is a legitimate "off" state, not a misconfiguration.
 
@@ -541,7 +558,17 @@ front end have nothing to check against, and that is a legitimate "off" state, n
 already relied on — the VPC link itself adds no hop). Left at `1` here, every client behind one edge
 location would share an `express-rate-limit` bucket as CloudFront's own edge IP.
 
-**Two things found only by applying this, not by writing it:**
+**Three things found only by applying this, not by writing it:**
+
+* **AWS WAF silently renames the headers it inserts**, so the origin-secret gate rejected 100% of
+  `/api/*` traffic the moment the enforcing image reached `dev` (2026-09-12). `insert_header { name =
+  "x-origin-verify" }` arrives at the origin as `x-amzn-waf-x-origin-verify` — documented behaviour,
+  "to avoid confusion with the headers that are already in the request", and not suppressible. Fixed
+  by moving the insertion to the distribution's `custom_header` (above), which sends the name
+  verbatim. **The wider lesson:** the unit test for the gate set the header itself, so it asserted the
+  same wrong name on both sides of the contract and passed — a test that stubs the producer of a
+  cross-system contract cannot validate that contract. The symptom also arrived heavily disguised;
+  see the CORS note in `backend.md`.
 
 * **ACM certificate tags reject parentheses and commas** — same class of validation-regex surprise as
   the WAF ACL description in `backstops-budget.tf` (`docs/architecture-decision-records/0005-...md` § L4 has the
@@ -557,13 +584,13 @@ location would share an `express-rate-limit` bucket as CloudFront's own edge IP.
   between "old thing destroyed" and "new thing created and DNS repointed" if anything in between
   fails — plan applies touching DNS-critical renames with that in mind.
 
-**What's live vs. what needs a deploy.** The CloudFront/WAF layer — geo-restriction, rate limiting,
+**What's live.** The CloudFront/WAF layer — geo-restriction, rate limiting,
 `disable_execute_api_endpoint` — is fully live and is what actually bounds cost; that was the point of
-Phase 2 and it's done. `requireOriginSecret` and the `trust proxy = 2` fix are server code that landed
-on a feature branch, not yet in a container image (`build-image.yml` only builds on merge to `main`).
-Confirmed directly: a request straight to `origin.dev.bread-sheet.com/api/...` currently reaches
-Express (401 from auth) rather than being rejected at the origin-secret gate (403) — that closes on
-the next `dev` deploy, the same as every other server-code change in this ADR.
+Phase 2 and it's done. `requireOriginSecret` and the `trust proxy = 2` fix went live with the first
+`dev` deploy after the Phase 2 merge, and that deploy is what exposed the `x-amzn-waf-` prefix bug
+above: the gate enforced correctly and rejected everything, because nothing was sending the header it
+checked for. The `custom_header` fix needs a `terraform apply` (no image rebuild — the running
+container already reads the right name); the `cors` reordering needs a `dev` deploy.
 
 **One manual step remains.** `EDGE_BYPASS_SECRET` (the CI/keepalive header value) needs copying into
 a GitHub Actions secret — no GitHub provider is configured here, so this isn't automatable from
