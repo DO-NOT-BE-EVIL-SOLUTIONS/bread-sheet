@@ -22,13 +22,19 @@ const app = express();
 // still can't be used to dodge limits. Bump only if another proxy is added.
 app.set('trust proxy', 2);
 
+// CORS first, ahead of every gate below it. `cors` only *adds* response
+// headers, so it grants no access on its own — but a rejection that lacks
+// Access-Control-Allow-Origin is unreadable to a browser: fetch rejects with a
+// bare TypeError, lib/api.ts maps that to NetworkError, and the app renders
+// OFFLINE_MESSAGE.
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+
 // 403s any /api/* request that didn't arrive through the
 // CloudFront distribution in front of the API — see the middleware for what
 // that actually buys, given the API Gateway custom domain stays publicly
-// resolvable. Runs before anything else touches the request.
+// resolvable. Runs before anything else touches the request body.
 app.use('/api', requireOriginSecret);
 
-app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json());
 
 // Request logging — emits a structured line per request including method,

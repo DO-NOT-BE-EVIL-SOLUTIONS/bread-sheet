@@ -11,12 +11,22 @@
 # lands on.
 #
 # Two secrets, two different jobs:
-#   - origin_verify_secret: inserted as X-Origin-Verify on every request this
-#     WAF allows through (both the default DE-pass and the edge-bypass rule).
-#     requireOriginSecret (server/src/app.ts) 403s anything lacking it — this
-#     is what makes origin.dev.bread-sheet.com's public resolvability harmless
-#     (disable_execute_api_endpoint, api-gateway.tf, closes the *other* public
-#     door). Never leaves AWS: generated here, read by Express via SSM.
+#   - origin_verify_secret: sent as X-Origin-Verify by the *distribution*
+#     (custom_header on the origin block below), not by the WAF.
+#     requireOriginSecret (server/src/middlewares) 403s anything lacking it —
+#     this is what makes origin.dev.bread-sheet.com's public resolvability
+#     harmless (disable_execute_api_endpoint, api-gateway.tf closes the
+#     *other* public door). Never leaves AWS: generated here, read by Express
+#     via SSM.
+#
+#     This was originally inserted by the WAF (custom_request_handling on the
+#     default action and on edge-bypass). That silently never worked: AWS WAF
+#     prefixes every header it inserts with `x-amzn-waf-`, so Express received
+#     `x-amzn-waf-x-origin-verify` while the gate checked `x-origin-verify`,
+#     and once the enforcing image reached dev it 403'd 100% of /api/* traffic.
+#     CloudFront's custom_header sends the name verbatim, lands on every
+#     request the distribution forwards regardless of which WAF rule allowed
+#     it, and is the pattern AWS documents for origin verification.
 #   - edge_bypass_secret: what CI (GitHub-hosted runners, not in Germany) and
 #     the VPC-link keepalive Lambda send to skip the geo rule. Copied out to
 #     GitHub manually (see the phase2_edge_bypass_secret output) since no
@@ -34,7 +44,7 @@ resource "random_password" "edge_bypass_secret" {
 
 resource "aws_ssm_parameter" "origin_verify_secret" {
   name        = "/breadsheet/dev/ORIGIN_VERIFY_SECRET"
-  description = "ADR 0005 Phase 2 - shared secret the CloudFront WAF inserts as X-Origin-Verify on every request it allows; requireOriginSecret (server/src/app.ts) checks it"
+  description = "ADR 0005 Phase 2 - shared secret the CloudFront distribution sends as X-Origin-Verify on every request it forwards to the origin; requireOriginSecret (server/src/middlewares/requireOriginSecret.ts) checks it"
   type        = "SecureString"
   value       = random_password.origin_verify_secret.result
 
@@ -47,7 +57,7 @@ resource "aws_wafv2_web_acl" "api" {
   provider = aws.use1
 
   name        = "${local.name_prefix}-api"
-  description = "ADR 0005 Phase 2 - geo DE + rate limit in front of the API, CI/keepalive bypass, origin-secret header insertion"
+  description = "ADR 0005 Phase 2 - geo DE + rate limit in front of the API, with a CI/keepalive bypass"
   scope       = "CLOUDFRONT"
 
   # Priority 0: CI (Maestro on GitHub-hosted runners) and the VPC-link keepalive
@@ -79,14 +89,7 @@ resource "aws_wafv2_web_acl" "api" {
     }
 
     action {
-      allow {
-        custom_request_handling {
-          insert_header {
-            name  = "x-origin-verify"
-            value = random_password.origin_verify_secret.result
-          }
-        }
-      }
+      allow {}
     }
 
     visibility_config {
@@ -155,19 +158,13 @@ resource "aws_wafv2_web_acl" "api" {
   }
 
   # Everything reaching here is from Germany and under the rate limit (or
-  # matched the edge-bypass rule above, which inserts the same header itself
-  # and never reaches this default action). Insert the header
-  # requireOriginSecret checks for — a request that skipped this distribution
-  # entirely (e.g. straight to origin.dev.bread-sheet.com) never carries it.
+  # matched the edge-bypass rule above). The origin-secret header is stamped by
+  # the distribution's custom_header rather than here, so it lands on every
+  # request CloudFront forwards whichever rule allowed it — and a request that
+  # skipped the distribution entirely (e.g. straight to
+  # origin.dev.bread-sheet.com) still never carries it.
   default_action {
-    allow {
-      custom_request_handling {
-        insert_header {
-          name  = "x-origin-verify"
-          value = random_password.origin_verify_secret.result
-        }
-      }
-    }
+    allow {}
   }
 
   visibility_config {
@@ -205,6 +202,15 @@ resource "aws_cloudfront_distribution" "api" {
   origin {
     domain_name = aws_route53_record.origin.fqdn
     origin_id   = "api-origin"
+
+    # What requireOriginSecret checks for. CloudFront overwrites a viewer-sent
+    # header of the same name before forwarding, so this cannot be spoofed
+    # through the distribution; a request straight to the origin domain can
+    # send the name but not the value.
+    custom_header {
+      name  = "x-origin-verify"
+      value = random_password.origin_verify_secret.result
+    }
 
     custom_origin_config {
       http_port                = 80

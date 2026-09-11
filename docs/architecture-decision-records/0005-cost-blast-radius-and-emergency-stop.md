@@ -818,9 +818,11 @@ directly. Three things, all mandatory together:
    `*.execute-api.eu-west-1.amazonaws.com` URL, which is currently public and published as the
    `api_endpoint` output.
 2. **A secret origin header.** The API Gateway *custom domain* stays publicly resolvable and answers
-   to anyone sending the right `Host`. The plan's WAF **header insertion** adds the shared secret to
-   requests that pass inspection; Express (`app.ts`) rejects requests without it. Without this the
-   filter is decorative.
+   to anyone sending the right `Host`. The **distribution** adds the shared secret as an origin
+   `custom_header` on every request it forwards; Express (`requireOriginSecret`) rejects requests
+   without it. Without this the filter is decorative. (First built on the WAF's **header insertion**
+   feature instead, which does not work for this — WAF renames what it inserts. See the third
+   correction below.)
 3. **A certificate in `us-east-1`.** CloudFront will not use the regional `eu-west-1` certificate
    in `dns.tf`. The plan includes a TLS certificate; if it does not cover a custom domain on the
    distribution, a second public ACM certificate is \$0 anyway. `aws_route53_record.server` then
@@ -838,7 +840,7 @@ edits; `server/src/middlewares/requireOriginSecret.ts`; `bread-sheet-app/lib/api
 domain moved to `origin.dev.bread-sheet.com` (own regional cert) and `disable_execute_api_endpoint`
 kills the raw execute-api URL — confirmed live, it now returns API Gateway's own
 `{"message":"Not Found"}` 404 regardless of path. The WAF (`edge-bypass` → `geo-de-only` →
-`rate-limit`, default-allow with header insertion) deploys and evaluates correctly — verified end to
+`rate-limit`, then default-allow) deploys and evaluates correctly — verified end to
 end: the site works over the new domain, the edge-bypass header matches its rule, and
 `disable_execute_api_endpoint` is confirmed by direct request.
 
@@ -858,15 +860,41 @@ end: the site works over the new domain, the edge-bypass header matches its rule
   destroyed" and "new resource created and DNS repointed" is a real outage window if anything in
   between fails, not just a Terraform bookkeeping detail.**
 
-**One gap deliberately left open by this apply, not a bug found by it.** `requireOriginSecret` and
-the `trust proxy = 2` fix are server code — committed, but not yet in a built container image
-(`build-image.yml` only builds on merge to `main`, and this landed on a feature branch). The
-CloudFront/WAF layer (geo, rate limit, disable_execute_api_endpoint) is fully live and is what bounds
-cost, which was the point of Phase 2; the origin-secret defense-in-depth check — closing the "someone
-finds `origin.dev.bread-sheet.com`" residual — goes live on the next deploy to `dev`, same as every
-other server-code change in this ADR that needed a redeploy to take effect. Confirmed by direct test:
-a request straight to `origin.dev.bread-sheet.com/api/...` currently reaches Express (401 from auth,
-not 403 from the gate) rather than being rejected at the origin-secret check.
+**Two more found by *deploying* it (2026-09-12).** The apply-time verification above could not catch
+these: the gate only starts enforcing once a container image containing it reaches `dev`, and when it
+did, it rejected everything.
+
+* **AWS WAF prefixes every header it inserts with `x-amzn-waf-`, so the origin-secret gate rejected
+  100% of API traffic** once the enforcing image reached `dev`. The WAF was configured with
+  `insert_header { name = "x-origin-verify" }`; Express received `x-amzn-waf-x-origin-verify` and
+  `requireOriginSecret` — checking `x-origin-verify` — 403'd every `/api/*` request from every
+  platform. This is documented behaviour ("to avoid confusion with the headers that are already in the
+  request") and is not suppressible, so the fix moves the insertion to the distribution's origin
+  `custom_header`, which sends the name verbatim, covers every forwarded request regardless of which
+  WAF rule allowed it, and is what AWS documents for origin verification. Discovered 2026-09-12, three
+  days after the apply, by a user reporting the app as broken — **not** by the test suite, and that is
+  the more useful half of this finding: the gate's unit test sets the header itself, so it asserted the
+  same wrong name on both sides of a cross-system contract and passed. *A test that stubs the producer
+  of a contract cannot validate the contract.* The only thing that could have caught this is an
+  assertion against the real edge, or against the Terraform literal.
+* **The failure was disguised as an offline app, which cost most of the diagnosis time.**
+  `requireOriginSecret` was mounted *above* `cors`, so its 403 carried no `Access-Control-Allow-Origin`
+  and the browser could not see the status at all: `fetch` rejected with a bare `TypeError`,
+  `lib/api.ts` mapped it to `NetworkError`, and the app rendered "you appear to be offline" on every
+  screen — while native, with no CORS to satisfy, showed the real 403. The `OPTIONS` preflight was
+  403'd too, since browsers never send `X-Origin-Verify` on one. `cors` now sits ahead of every gate
+  (it only adds response headers, so it grants nothing on its own) and `src/app.test.ts` pins the
+  order. **Generalised:** a rejection emitted before CORS headers is, to a browser, indistinguishable
+  from an unreachable server — put every middleware that can reject *below* `cors`, or accept that its
+  rejections will be reported to users as connectivity failures.
+
+**State after the fix.** The CloudFront/WAF layer (geo, rate limit, `disable_execute_api_endpoint`) has
+been live and bounding cost since 2026-09-09 and was never affected by either bug — it was only ever
+the origin-secret defence-in-depth check that was broken, and it was broken *closed*, so the residual
+it exists to cover ("someone finds `origin.dev.bread-sheet.com`") was never open. Restoring service
+needs a `terraform apply` only: the running image already checks the correct header name, so moving the
+insertion to the distribution fixes it without a rebuild. The `cors` reorder ships with the next `dev`
+deploy and changes no behaviour beyond making future rejections legible.
 
 ## Implementation
 
@@ -883,7 +911,8 @@ Phase 1 is in progress in parallel with this ADR. Order matters where noted.
 | 6 | **L5** — distribution + OAC + WAF ACL + Free plan subscription; remove `PublicReadAllowProcessed`; `ASSET_BASE_URL` → distribution domain (task env var: forced replacement); fix `rds.tf` to use `var.db_max_allocated_storage` while in the file | `terraform/`, `infrastructure.md` | ✅ applied (distribution live, verified end-to-end); ✅ Free plan console step |
 | 7 | **L4** — GCP budget → Pub/Sub → billing-detach function at \$40; `aws_budgets_budget_action` stopping RDS at 150% | GCP, `../../terraform/backstops-budget.tf` | ✅ applied; wiring verified with synthetic under-budget messages (real detach path deliberately never exercised) |
 | 8 | Raise `GEMINI_DAILY_CALL_CAP` on `dev` to 300 once step 2 confirms ~\$0.0036/call | task env | ✅ |
-| P2 | **Phase 2** — API distribution on Free plan 2: WAF geo `DE` + rate rule + header insertion secret, `disable_execute_api_endpoint`, `us-east-1` cert, DNS alias; CI allow path | `terraform/`, `server/app.ts`, `.github/workflows/test-native-e2e.yml` | ✅ infra applied and verified; ☐ Free plan console step; ☐ `ORIGIN_VERIFY_SECRET` enforcement live on `dev` (pending merge to `main` + image build); ☐ `EDGE_BYPASS_SECRET` copied to GitHub |
+| P2 | **Phase 2** — API distribution on Free plan 2: WAF geo `DE` + rate rule + origin-secret header, `disable_execute_api_endpoint`, `us-east-1` cert, DNS alias; CI allow path | `terraform/`, `server/app.ts`, `.github/workflows/test-native-e2e.yml` | ✅ infra applied and verified; ☐ Free plan console step; ☐ `EDGE_BYPASS_SECRET` copied to GitHub |
+| P2a | **Phase 2 fix** — origin-secret header moves from WAF `insert_header` (arrives prefixed `x-amzn-waf-`, matched nothing, 403'd all API traffic) to the distribution's origin `custom_header`; `cors` reordered above the gates so such a rejection reads as 403 rather than as offline; regression test on the ordering | `terraform/dev-geo-restriction.tf`, `server/src/app.ts`, `server/src/app.test.ts` | ☐ `terraform apply` (fixes it — no image rebuild needed); ☐ `dev` deploy for the `cors` reorder |
 
 Steps 1, 3, 4 and 6 are independent of each other and can land in any order; 5 depends on 2 only
 for its *number*, not its code; 8 depends on 2 and 5.
